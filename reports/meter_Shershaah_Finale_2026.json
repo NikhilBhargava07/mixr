@@ -1,0 +1,66 @@
+{
+  "file": "Shershaah_Finale_2026",
+  "grid_bpm": 99.4,
+  "bands": {
+    "low": {
+      "duple_mass": 0.0264,
+      "triple_mass": 0.055,
+      "triple_over_duple": 2.08,
+      "verdict": "compound(3s)",
+      "cycle_12bin": [
+        0.0,
+        0.0,
+        0.2078,
+        0.0307,
+        0.0,
+        0.3282,
+        0.0,
+        0.0,
+        0.11,
+        0.0485,
+        0.031,
+        0.2438
+      ]
+    },
+    "mid": {
+      "duple_mass": 0.0173,
+      "triple_mass": 0.0719,
+      "triple_over_duple": 4.15,
+      "verdict": "compound(3s)",
+      "cycle_12bin": [
+        0.0048,
+        0.0,
+        0.0869,
+        0.0369,
+        0.016,
+        0.2771,
+        0.0,
+        0.0,
+        0.1277,
+        0.0151,
+        0.0098,
+        0.4257
+      ]
+    },
+    "high": {
+      "duple_mass": 0.0276,
+      "triple_mass": 0.0107,
+      "triple_over_duple": 0.39,
+      "verdict": "straight(2s)",
+      "cycle_12bin": [
+        0.0,
+        0.0092,
+        0.0564,
+        0.0643,
+        0.0214,
+        0.2527,
+        0.0083,
+        0.0461,
+        0.0,
+        0.0101,
+        0.0092,
+        0.5223
+      ]
+    }
+  }
+}

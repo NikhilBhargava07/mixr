@@ -1,0 +1,66 @@
+{
+  "file": "Surma_South_2026_v2",
+  "grid_bpm": 84.7,
+  "bands": {
+    "low": {
+      "duple_mass": 0.0536,
+      "triple_mass": 0.0532,
+      "triple_over_duple": 0.99,
+      "verdict": "ambiguous",
+      "cycle_12bin": [
+        0.4624,
+        0.0,
+        0.0,
+        0.0,
+        0.0495,
+        0.1269,
+        0.0997,
+        0.0,
+        0.0569,
+        0.061,
+        0.0,
+        0.1436
+      ]
+    },
+    "mid": {
+      "duple_mass": 0.0,
+      "triple_mass": 0.0731,
+      "triple_over_duple": 73134670.16,
+      "verdict": "compound(3s)",
+      "cycle_12bin": [
+        0.0,
+        0.0246,
+        0.0651,
+        0.0,
+        0.0111,
+        0.2562,
+        0.0,
+        0.0122,
+        0.1352,
+        0.0,
+        0.0,
+        0.4956
+      ]
+    },
+    "high": {
+      "duple_mass": 0.0065,
+      "triple_mass": 0.085,
+      "triple_over_duple": 13.15,
+      "verdict": "compound(3s)",
+      "cycle_12bin": [
+        0.0,
+        0.0,
+        0.1321,
+        0.0,
+        0.0157,
+        0.3087,
+        0.0194,
+        0.0179,
+        0.1544,
+        0.0,
+        0.0,
+        0.3518
+      ]
+    }
+  }
+}

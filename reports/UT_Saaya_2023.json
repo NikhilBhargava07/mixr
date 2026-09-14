@@ -1,0 +1,227 @@
+{
+  "file": "UT_Saaya_2023",
+  "duration_sec": 129.76,
+  "tempo_global_bpm": 99.4,
+  "tempo_dynamic_median": 143.6,
+  "tempo_dynamic_range": [
+    78.3,
+    198.8
+  ],
+  "n_beats": 206,
+  "key_global": {
+    "key": "D# major",
+    "confidence": 0.868,
+    "runner_up": "C minor"
+  },
+  "perc_ratio_global": 0.359,
+  "sections": [
+    {
+      "start": 2.88,
+      "end": 15.67,
+      "tempo_median": 129.2,
+      "key": {
+        "key": "D# major",
+        "confidence": 0.817,
+        "runner_up": "D# minor"
+      },
+      "rms_mean": 0.0583,
+      "perc_ratio": 0.415,
+      "brightness_hz": 2715.0
+    },
+    {
+      "start": 15.67,
+      "end": 26.01,
+      "tempo_median": 161.5,
+      "key": {
+        "key": "D# major",
+        "confidence": 0.684,
+        "runner_up": "D# minor"
+      },
+      "rms_mean": 0.2,
+      "perc_ratio": 0.336,
+      "brightness_hz": 2689.0
+    },
+    {
+      "start": 26.01,
+      "end": 27.28,
+      "tempo_median": 161.5,
+      "key": {
+        "key": "D# major",
+        "confidence": 0.306,
+        "runner_up": "G# major"
+      },
+      "rms_mean": 0.1494,
+      "perc_ratio": 0.404,
+      "brightness_hz": 3142.0
+    },
+    {
+      "start": 27.28,
+      "end": 34.55,
+      "tempo_median": 161.5,
+      "key": {
+        "key": "D# major",
+        "confidence": 0.663,
+        "runner_up": "D# minor"
+      },
+      "rms_mean": 0.2,
+      "perc_ratio": 0.323,
+      "brightness_hz": 2782.0
+    },
+    {
+      "start": 34.55,
+      "end": 36.41,
+      "tempo_median": 143.6,
+      "key": {
+        "key": "B major",
+        "confidence": 0.472,
+        "runner_up": "G# minor"
+      },
+      "rms_mean": 0.2198,
+      "perc_ratio": 0.379,
+      "brightness_hz": 2836.0
+    },
+    {
+      "start": 36.41,
+      "end": 56.17,
+      "tempo_median": 143.6,
+      "key": {
+        "key": "D# minor",
+        "confidence": 0.591,
+        "runner_up": "D# major"
+      },
+      "rms_mean": 0.3369,
+      "perc_ratio": 0.323,
+      "brightness_hz": 2535.0
+    },
+    {
+      "start": 56.17,
+      "end": 61.49,
+      "tempo_median": 172.3,
+      "key": {
+        "key": "G minor",
+        "confidence": 0.567,
+        "runner_up": "A# major"
+      },
+      "rms_mean": 0.1496,
+      "perc_ratio": 0.48,
+      "brightness_hz": 2003.0
+    },
+    {
+      "start": 61.49,
+      "end": 68.68,
+      "tempo_median": 99.4,
+      "key": {
+        "key": "C major",
+        "confidence": 0.853,
+        "runner_up": "F major"
+      },
+      "rms_mean": 0.2427,
+      "perc_ratio": 0.321,
+      "brightness_hz": 2846.0
+    },
+    {
+      "start": 68.68,
+      "end": 71.08,
+      "tempo_median": 198.8,
+      "key": {
+        "key": "C minor",
+        "confidence": 0.559,
+        "runner_up": "C major"
+      },
+      "rms_mean": 0.1456,
+      "perc_ratio": 0.474,
+      "brightness_hz": 3163.0
+    },
+    {
+      "start": 71.08,
+      "end": 79.6,
+      "tempo_median": 198.8,
+      "key": {
+        "key": "C major",
+        "confidence": 0.755,
+        "runner_up": "C minor"
+      },
+      "rms_mean": 0.244,
+      "perc_ratio": 0.339,
+      "brightness_hz": 2907.0
+    },
+    {
+      "start": 79.6,
+      "end": 90.21,
+      "tempo_median": 152.0,
+      "key": {
+        "key": "A minor",
+        "confidence": 0.246,
+        "runner_up": "G minor"
+      },
+      "rms_mean": 0.1742,
+      "perc_ratio": 0.339,
+      "brightness_hz": 2772.0
+    },
+    {
+      "start": 90.21,
+      "end": 103.33,
+      "tempo_median": 152.0,
+      "key": {
+        "key": "C major",
+        "confidence": 0.735,
+        "runner_up": "C minor"
+      },
+      "rms_mean": 0.216,
+      "perc_ratio": 0.364,
+      "brightness_hz": 2773.0
+    },
+    {
+      "start": 103.33,
+      "end": 105.81,
+      "tempo_median": 95.7,
+      "key": {
+        "key": "A# major",
+        "confidence": 0.514,
+        "runner_up": "D minor"
+      },
+      "rms_mean": 0.1129,
+      "perc_ratio": 0.5,
+      "brightness_hz": 3206.0
+    },
+    {
+      "start": 105.81,
+      "end": 115.38,
+      "tempo_median": 99.4,
+      "key": {
+        "key": "E major",
+        "confidence": 0.67,
+        "runner_up": "E minor"
+      },
+      "rms_mean": 0.2189,
+      "perc_ratio": 0.41,
+      "brightness_hz": 3081.0
+    },
+    {
+      "start": 115.38,
+      "end": 117.79,
+      "tempo_median": 99.4,
+      "key": {
+        "key": "D# minor",
+        "confidence": 0.314,
+        "runner_up": "E minor"
+      },
+      "rms_mean": 0.1261,
+      "perc_ratio": 0.512,
+      "brightness_hz": 2824.0
+    },
+    {
+      "start": 117.79,
+      "end": 129.76,
+      "tempo_median": 99.4,
+      "key": {
+        "key": "E major",
+        "confidence": 0.598,
+        "runner_up": "E minor"
+      },
+      "rms_mean": 0.1756,
+      "perc_ratio": 0.394,
+      "brightness_hz": 3142.0
+    }
+  ]
+}

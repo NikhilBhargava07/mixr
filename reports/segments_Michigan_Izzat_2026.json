@@ -1,0 +1,352 @@
+[
+  {
+    "label": "jugni_bhangra",
+    "start": 10,
+    "end": 42,
+    "mmss": "0:10.0-0:42.0",
+    "tempo_bpm": 136.0,
+    "tempo_half": 68.0,
+    "key": {
+      "key": "A minor",
+      "confidence": 0.881
+    },
+    "rms": 0.3817,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 0.78,
+        "triple_over_duple": 0.56,
+        "verdict": "straight"
+      },
+      "mid": {
+        "onsets_per_sec": 2.12,
+        "triple_over_duple": 1.38,
+        "verdict": "compound"
+      },
+      "high": {
+        "onsets_per_sec": 0.75,
+        "triple_over_duple": 20689231.5,
+        "verdict": "compound"
+      }
+    },
+    "vocal": {
+      "coverage": 0.8,
+      "onsets_per_sec": 1.09,
+      "vocal_drum_cosine": 0.666
+    }
+  },
+  {
+    "label": "kuthu",
+    "start": 55,
+    "end": 107,
+    "mmss": "0:55.0-1:47.0",
+    "tempo_bpm": 82.0,
+    "tempo_half": 41.0,
+    "key": {
+      "key": "C# minor",
+      "confidence": 0.796
+    },
+    "rms": 0.2829,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 0.83,
+        "triple_over_duple": 0.83,
+        "verdict": "ambiguous"
+      },
+      "mid": {
+        "onsets_per_sec": 1.81,
+        "triple_over_duple": 0.08,
+        "verdict": "straight"
+      },
+      "high": {
+        "onsets_per_sec": 0.92,
+        "triple_over_duple": 0.29,
+        "verdict": "straight"
+      }
+    },
+    "vocal": {
+      "coverage": 0.619,
+      "onsets_per_sec": 0.48,
+      "vocal_drum_cosine": 0.695
+    }
+  },
+  {
+    "label": "jhummar",
+    "start": 112,
+    "end": 185,
+    "mmss": "1:52.0-3:05.0",
+    "tempo_bpm": 92.3,
+    "tempo_half": 46.1,
+    "key": {
+      "key": "C minor",
+      "confidence": 0.729
+    },
+    "rms": 0.2393,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 0.75,
+        "triple_over_duple": 1.43,
+        "verdict": "compound"
+      },
+      "mid": {
+        "onsets_per_sec": 1.16,
+        "triple_over_duple": 0.45,
+        "verdict": "straight"
+      },
+      "high": {
+        "onsets_per_sec": 1.32,
+        "triple_over_duple": 1.04,
+        "verdict": "ambiguous"
+      }
+    },
+    "vocal": {
+      "coverage": 0.747,
+      "onsets_per_sec": 0.84,
+      "vocal_drum_cosine": 0.893
+    }
+  },
+  {
+    "label": "jacket_hiphop",
+    "start": 188,
+    "end": 206,
+    "mmss": "3:08.0-3:26.0",
+    "tempo_bpm": 114.8,
+    "tempo_half": 57.4,
+    "key": {
+      "key": "G minor",
+      "confidence": 0.668
+    },
+    "rms": 0.2111,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 0.06,
+        "triple_over_duple": 499999999.98,
+        "verdict": "compound"
+      },
+      "mid": {
+        "onsets_per_sec": 0.11,
+        "triple_over_duple": 312204350.13,
+        "verdict": "compound"
+      },
+      "high": {
+        "onsets_per_sec": 0.22,
+        "triple_over_duple": 158586491.99,
+        "verdict": "compound"
+      }
+    },
+    "vocal": {
+      "coverage": 0.616,
+      "onsets_per_sec": 1.56,
+      "vocal_drum_cosine": 0.2
+    }
+  },
+  {
+    "label": "jacket_dance",
+    "start": 208,
+    "end": 237,
+    "mmss": "3:28.0-3:57.0",
+    "tempo_bpm": 117.5,
+    "tempo_half": 58.7,
+    "key": {
+      "key": "G minor",
+      "confidence": 0.583
+    },
+    "rms": 0.2719,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 1.03,
+        "triple_over_duple": 25685115.81,
+        "verdict": "compound"
+      },
+      "mid": {
+        "onsets_per_sec": 1.48,
+        "triple_over_duple": 31958358.66,
+        "verdict": "compound"
+      },
+      "high": {
+        "onsets_per_sec": 1.0,
+        "triple_over_duple": 15117319.79,
+        "verdict": "compound"
+      }
+    },
+    "vocal": {
+      "coverage": 0.55,
+      "onsets_per_sec": 0.17,
+      "vocal_drum_cosine": 0.907
+    }
+  },
+  {
+    "label": "khunde_part1",
+    "start": 256,
+    "end": 294,
+    "mmss": "4:16.0-4:54.0",
+    "tempo_bpm": 97.5,
+    "tempo_half": 48.8,
+    "key": {
+      "key": "G minor",
+      "confidence": 0.774
+    },
+    "rms": 0.3458,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 0.16,
+        "triple_over_duple": 286076805.22,
+        "verdict": "compound"
+      },
+      "mid": {
+        "onsets_per_sec": 0.76,
+        "triple_over_duple": 2.78,
+        "verdict": "compound"
+      },
+      "high": {
+        "onsets_per_sec": 0.32,
+        "triple_over_duple": 0.0,
+        "verdict": "straight"
+      }
+    },
+    "vocal": {
+      "coverage": 0.671,
+      "onsets_per_sec": 0.76,
+      "vocal_drum_cosine": 0.724
+    }
+  },
+  {
+    "label": "khunde_chaal_postdamnson",
+    "start": 297,
+    "end": 322,
+    "mmss": "4:57.0-5:22.0",
+    "tempo_bpm": 147.7,
+    "tempo_half": 73.8,
+    "key": {
+      "key": "G minor",
+      "confidence": 0.822
+    },
+    "rms": 0.3442,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 0.84,
+        "triple_over_duple": 68130590.66,
+        "verdict": "compound"
+      },
+      "mid": {
+        "onsets_per_sec": 0.4,
+        "triple_over_duple": 0.0,
+        "verdict": "straight"
+      },
+      "high": {
+        "onsets_per_sec": 0.24,
+        "triple_over_duple": 1.35,
+        "verdict": "compound"
+      }
+    },
+    "vocal": {
+      "coverage": 0.622,
+      "onsets_per_sec": 0.28,
+      "vocal_drum_cosine": 0.931
+    }
+  },
+  {
+    "label": "smooth_criminal",
+    "start": 325,
+    "end": 400,
+    "mmss": "5:25.0-6:40.0",
+    "tempo_bpm": 117.5,
+    "tempo_half": 58.7,
+    "key": {
+      "key": "C major",
+      "confidence": 0.649
+    },
+    "rms": 0.2295,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 1.03,
+        "triple_over_duple": 0.1,
+        "verdict": "straight"
+      },
+      "mid": {
+        "onsets_per_sec": 1.15,
+        "triple_over_duple": 0.0,
+        "verdict": "straight"
+      },
+      "high": {
+        "onsets_per_sec": 0.91,
+        "triple_over_duple": 0.0,
+        "verdict": "straight"
+      }
+    },
+    "vocal": {
+      "coverage": 0.622,
+      "onsets_per_sec": 1.17,
+      "vocal_drum_cosine": 0.924
+    }
+  },
+  {
+    "label": "finale_kuthu_LOKA",
+    "start": 424,
+    "end": 470,
+    "mmss": "7:04.0-7:50.0",
+    "tempo_bpm": 82.0,
+    "tempo_half": 41.0,
+    "key": {
+      "key": "F minor",
+      "confidence": 0.872
+    },
+    "rms": 0.3326,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 1.15,
+        "triple_over_duple": 1.9,
+        "verdict": "compound"
+      },
+      "mid": {
+        "onsets_per_sec": 1.76,
+        "triple_over_duple": 1.38,
+        "verdict": "compound"
+      },
+      "high": {
+        "onsets_per_sec": 0.59,
+        "triple_over_duple": 71362195.73,
+        "verdict": "compound"
+      }
+    },
+    "vocal": {
+      "coverage": 0.746,
+      "onsets_per_sec": 0.7,
+      "vocal_drum_cosine": 0.458
+    }
+  },
+  {
+    "label": "finale_bhangra_V3NOM",
+    "start": 475,
+    "end": 493,
+    "mmss": "7:55.0-8:13.0",
+    "tempo_bpm": 99.4,
+    "tempo_half": 49.7,
+    "key": {
+      "key": "F minor",
+      "confidence": 0.86
+    },
+    "rms": 0.2994,
+    "bands": {
+      "low": {
+        "onsets_per_sec": 1.0,
+        "triple_over_duple": 73994240.77,
+        "verdict": "compound"
+      },
+      "mid": {
+        "onsets_per_sec": 2.39,
+        "triple_over_duple": 110701129.47,
+        "verdict": "compound"
+      },
+      "high": {
+        "onsets_per_sec": 1.89,
+        "triple_over_duple": 1.06,
+        "verdict": "ambiguous"
+      }
+    },
+    "vocal": {
+      "coverage": 0.606,
+      "onsets_per_sec": 1.06,
+      "vocal_drum_cosine": 0.844
+    }
+  }
+]

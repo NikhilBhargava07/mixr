@@ -1,0 +1,38 @@
+# --- environments
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
+.DS_Store
+
+# --- audio: never in git. Too big, and most of it isn't ours to redistribute.
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.aif
+*.aiff
+*.ogg
+example_mixes/
+reference/
+renders/
+mixes/
+library/audio/
+
+# --- regenerable app state
+app/_cache/
+app/_stems/
+app/_projects/
+workdir/
+
+# --- lyric transcriptions of copyrighted songs (analysis stays, text doesn't)
+reports/lyrics_*.txt
+
+# --- model downloads / tensors
+*.pt
+*.ckpt
+*.npy
+*.npz
+
+# --- personal data (Google Takeout export)
+library/Takeout/

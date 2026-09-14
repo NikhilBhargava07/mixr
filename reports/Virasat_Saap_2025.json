@@ -1,0 +1,110 @@
+{
+  "file": "Virasat_Saap_2025",
+  "duration_sec": 57.6,
+  "tempo_global_bpm": 99.4,
+  "tempo_dynamic_median": 99.4,
+  "tempo_dynamic_range": [
+    76.0,
+    152.0
+  ],
+  "n_beats": 86,
+  "key_global": {
+    "key": "G minor",
+    "confidence": 0.887,
+    "runner_up": "G major"
+  },
+  "perc_ratio_global": 0.438,
+  "sections": [
+    {
+      "start": 2.11,
+      "end": 5.62,
+      "tempo_median": 38.6,
+      "key": {
+        "key": "G minor",
+        "confidence": 0.632,
+        "runner_up": "G major"
+      },
+      "rms_mean": 0.011,
+      "perc_ratio": 0.315,
+      "brightness_hz": 1403.0
+    },
+    {
+      "start": 5.62,
+      "end": 6.99,
+      "tempo_median": 76.0,
+      "key": {
+        "key": "G minor",
+        "confidence": 0.628,
+        "runner_up": "G major"
+      },
+      "rms_mean": 0.11,
+      "perc_ratio": 0.401,
+      "brightness_hz": 2871.0
+    },
+    {
+      "start": 6.99,
+      "end": 14.47,
+      "tempo_median": 95.7,
+      "key": {
+        "key": "G minor",
+        "confidence": 0.847,
+        "runner_up": "G major"
+      },
+      "rms_mean": 0.1448,
+      "perc_ratio": 0.476,
+      "brightness_hz": 2023.0
+    },
+    {
+      "start": 14.47,
+      "end": 19.37,
+      "tempo_median": 95.7,
+      "key": {
+        "key": "G minor",
+        "confidence": 0.539,
+        "runner_up": "D# major"
+      },
+      "rms_mean": 0.1384,
+      "perc_ratio": 0.425,
+      "brightness_hz": 2734.0
+    },
+    {
+      "start": 19.37,
+      "end": 38.75,
+      "tempo_median": 99.4,
+      "key": {
+        "key": "G minor",
+        "confidence": 0.779,
+        "runner_up": "C minor"
+      },
+      "rms_mean": 0.1708,
+      "perc_ratio": 0.447,
+      "brightness_hz": 2784.0
+    },
+    {
+      "start": 38.75,
+      "end": 44.65,
+      "tempo_median": 112.3,
+      "key": {
+        "key": "C minor",
+        "confidence": 0.305,
+        "runner_up": "C# minor"
+      },
+      "rms_mean": 0.1293,
+      "perc_ratio": 0.484,
+      "brightness_hz": 3457.0
+    },
+    {
+      "start": 44.65,
+      "end": 57.6,
+      "tempo_median": 143.6,
+      "key": {
+        "key": "G minor",
+        "confidence": 0.899,
+        "runner_up": "A# major"
+      },
+      "rms_mean": 0.1389,
+      "perc_ratio": 0.394,
+      "brightness_hz": 3441.0
+    }
+  ]
+}

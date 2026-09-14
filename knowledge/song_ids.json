@@ -1,0 +1,204 @@
+{
+  "_comment": "Source songs identified in corpus mixes. method: lyric_transcription = Whisper on Demucs vocal stem + web lyric search. confidence: confirmed (user-verified), high (distinctive lyric matched), medium (garbled but plausible), low (guess). USER-SUPPLIED entries are ground truth.",
+  "Hip_hop_1_": [
+    {
+      "song": "3.5",
+      "artist": "ian",
+      "approx_range": "0:07-0:28",
+      "method": "lyric_transcription",
+      "confidence": "confirmed",
+      "evidence": "'3.5 just to help me sleep' verbatim; user confirmed"
+    },
+    {
+      "song": "Demons",
+      "artist": "A$AP Ferg",
+      "approx_range": "0:31-1:07",
+      "method": "lyric_transcription",
+      "confidence": "high",
+      "evidence": "'my uncle was a fiend', demon references, hook 'my soul ain't for sale' at 0:51+"
+    }
+  ],
+  "Shershaah_Intro_2026": [
+    {
+      "song": "NO BYSTANDERS",
+      "artist": "Travis Scott (feat. Sheck Wes, Juice WRLD)",
+      "approx_range": "0:05-1:13",
+      "method": "lyric_transcription",
+      "confidence": "high",
+      "evidence": "'she get trippy off Xans, lost 21 grams, and she did it on cam' + 'make my own rules'"
+    }
+  ],
+  "Shershaah_Finale_2026": [
+    {
+      "song": "Pittsburgh Sound",
+      "artist": "Wiz Khalifa",
+      "approx_range": "1:18-1:31",
+      "method": "lyric_transcription",
+      "confidence": "high",
+      "evidence": "'I got that Pittsburgh sound and I'ma hold this whole Pittsburgh down' - matches Wiz Khalifa 'Pittsburgh Sound' (2006, Show and Prove)",
+      "why_it_matters": "HOMETOWN SHOUTOUT TECHNIQUE. Shershaah is a Pittsburgh team (Steel City Shershaah, CMU/Pitt). The DJ drops a city anthem in the finale = instant crowd/judge connection. Placed at the very end of the segment, right before the last push."
+    },
+    {
+      "song": "Bitch, Don't Kill My Vibe",
+      "artist": "Kendrick Lamar",
+      "approx_range": "1:06-1:15",
+      "method": "lyric_transcription",
+      "confidence": "medium",
+      "evidence": "garbled 'Lord is never gonna forgive me if I sin again' ~ 'I am a sinner who's probably gonna sin again / Lord forgive me'. NEEDS VERIFICATION"
+    },
+    {
+      "song": "UNKNOWN (repeated hook, likely Punjabi)",
+      "approx_range": "0:12-1:06",
+      "method": "lyric_transcription",
+      "confidence": "low",
+      "evidence": "Whisper renders as 'he's a cacacacan' repeatedly in EN, no usable Punjabi decode. Likely the main bhangra vocal - needs manual ID."
+    }
+  ],
+  "Khunde": [
+    {
+      "song": "UNKNOWN",
+      "approx_range": "0:03-0:15",
+      "method": "lyric_transcription",
+      "confidence": "low",
+      "evidence": "'Why the fuck is they keep trying to play with us?' (clean decode, logprob -0.36) - searched, no lyric match. Possibly a chopped/pitched vocal or a less-indexed track."
+    }
+  ],
+  "_method_limits": {
+    "works_well": "English rap over separated vocal stem. 4/4 IDs so far (ian 3.5, ASAP Ferg Demons, Travis Scott NO BYSTANDERS, Wiz Khalifa Pittsburgh Sound).",
+    "fails": "Indian-language vocals. Forced-language Whisper (medium model, pa/hi/ta/te/sa) produced ZERO usable output on kuthu and bharatanatyam stems, and nothing on the Punjabi bhangra hooks. Causes: sung melisma vs speech models, pitch/tempo shifting by the DJ, heavy layering, and Punjabi being poorly represented in training data.",
+    "implication": "Automated ID covers the English/western half of a fusion mix only. The desi half - which is the half that defines the style - needs user knowledge or DJ tracklists. Plan accordingly: ask DJs for tracklists, and treat user-supplied IDs as the primary source for desi material."
+  },
+  "_themes": {
+    "Wisconsin_Surma_Jazba_2026": {
+      "theme": "SCYTHE (Neal Shusterman novel series)",
+      "evidence": "Full-set VO transcript: scythedom, apprentices, 'the art of gleaning', old guard vs new order, 'a scythe is merely the instrument of death but it is you who wields us'",
+      "note": "VO is original narration written for the set, not sampled audio"
+    },
+    "Texas_Talaash_2022": {
+      "theme": "THE COSMOS / solar system tour",
+      "evidence": "VO: 'welcome to the Cosmos', planet-by-planet narration (Mercury/Venus, Moon, Mars, Jupiter, Saturn's 'seven rings')",
+      "note": "VO doubles as segment signposting - 'seven rings' line directly sets up the 7 Rings song choice"
+    }
+  },
+  "Penn_Dhamaka_2026": [
+    {
+      "song": "Bill Nye the Science Guy (theme)",
+      "artist": "TV theme",
+      "approx_range": "0:00, 0:27, 8:11-8:18",
+      "method": "lyric_transcription",
+      "confidence": "high",
+      "evidence": "'Bill Nye the Science God is brought to you by', 'Bill Bill Bill', 'Good night the science guy' \u2014 set THEME, used as bookends"
+    },
+    {
+      "song": "Forever",
+      "artist": "Drake (feat. Kanye/Lil Wayne/Eminem)",
+      "approx_range": "0:17",
+      "method": "lyric_transcription",
+      "confidence": "medium",
+      "evidence": "'Last name ever, first name greatest' \u2014 Drake's opening line on Forever"
+    },
+    {
+      "song": "Chaiyya Chaiyya",
+      "artist": "Sukhwinder Singh & Sapna Awasthi (Dil Se)",
+      "approx_range": "0:29-1:20",
+      "method": "lyric_transcription",
+      "confidence": "high",
+      "evidence": "'Chaiya chaiya chaiya chaiya' + 'jinke sar ho ishq ki chaon / paaon ke neeche jannat hogi' verbatim"
+    },
+    {
+      "song": "Can't Hold Us",
+      "artist": "Macklemore & Ryan Lewis (feat. Ray Dalton)",
+      "approx_range": "8:26-9:30 (set closer)",
+      "method": "lyric_transcription",
+      "confidence": "high",
+      "evidence": "'this is the moment, tonight is the night' + 'like the ceiling can't hold us' verbatim",
+      "why_it_matters": "RESOLVES THE 147.66 BPM COUNTEREXAMPLE. Can't Hold Us is natively 146 BPM; our fit measured 147.66. Penn does not end on finale bhangra at all \u2014 it ends on a western hype anthem at its own tempo, closing a Bill Nye-themed set. The bhangra-family ~99 BPM convention isn't broken here, it's simply not being attempted."
+    }
+  ],
+  "Broad_Street_Baadshahz_2026": [
+    {
+      "song": "Loveeeeeee Song",
+      "artist": "Rihanna feat. Future",
+      "approx_range": "3:56-6:46 (recurring hook)",
+      "method": "lyric_transcription",
+      "confidence": "high",
+      "evidence": "'I don't want to give you the wrong impression, I need love and affection' verbatim"
+    },
+    {
+      "song": "MODERN JAM",
+      "approx_range": "0:00-0:26, 3:01-3:26, 4:45+",
+      "method": "lyric_transcription",
+      "confidence": "high",
+      "evidence": "'even in the winter it's a summer jam' + 'I hear the zeitgeist now I'm in the zone' verbatim",
+      "artist": "Travis Scott (Utopia)",
+      "note": "This is the song the MIX OPENS WITH (0:00) and returns to at 3:01 and 4:45 \u2014 the recurring spine of the set."
+    },
+    {
+      "song": "UNKNOWN (UK drill/grime)",
+      "approx_range": "8:09-8:19",
+      "method": "lyric_transcription",
+      "confidence": "low",
+      "evidence": "'murder man, sing your murder music off a murder van'"
+    }
+  ],
+  "_dj_tags": {
+    "_comment": "DJ tags are spoken signatures. First one captured 2026-08-02. Note the SETUP technique: DJs lead into their tag with a recognizable sample whose lyric primes the name.",
+    "KEV7N": {
+      "mix": "Broad_Street_Baadshahz_2026",
+      "t": "8:33.3",
+      "text": "Guess who's back? Oh my god, I'm really Kevin 7 on the track",
+      "setup": "'Guess who's back' = Eminem 'Without Me' hook, used as a lead-in before the tag lands",
+      "placement": "inside the closing segment, ~23s before the mix ends",
+      "formula": "'<name> on the track' \u2014 same construction as VC's 'VC on the track'"
+    },
+    "Bassdoctor": {
+      "mix": "Penn_Dhamaka_2026",
+      "t": "6:47.5",
+      "text": "Is there a doctor in the house?",
+      "confidence": "user-confirmed",
+      "note": "This IS the tag itself, not a setup line. Correction from my earlier guess (2026-08-02) - user confirmed. Bassdoctor's tag is a question rather than a '<name> on the track' statement.",
+      "formula": "indirect/pun tag - names the DJ by implication ('doctor') without stating the handle"
+    },
+    "_tag_formulas": {
+      "_comment": "Two axes: WHAT is said (lyrical formula) and HOW it is delivered (production treatment). User-supplied 2026-08-02.",
+      "lyrical_formula": {
+        "direct_statement": "'<name> on the track' \u2014 VC ('VC on the track'), KEV7N ('I'm really Kevin 7 on the track'). May be primed by a recognizable sample first (KEV7N uses Eminem 'Guess who's back').",
+        "indirect_pun": "Bassdoctor \u2014 'Is there a doctor in the house?'. Names the DJ by implication; handle never spoken.",
+        "bare_name": "Loka \u2014 literally just the word 'Loka' spoken."
+      },
+      "delivery_treatment": {
+        "whispered": [
+          "Astro"
+        ],
+        "pitched_up_female_autotuned": [
+          "V3NOM",
+          "Lotus"
+        ],
+        "quick_plain_spoken": [
+          "Loka"
+        ],
+        "conversational_statement": [
+          "VC",
+          "KEV7N"
+        ],
+        "question_sample": [
+          "Bassdoctor"
+        ]
+      },
+      "why_detection_failed": "Whisper found only 2 of 13 known tags. The delivery treatments explain it: whispered vocals fall below the model's speech threshold, pitched-up/autotuned voices are out of distribution for speech models, and bare one-word names ('Loka') carry no linguistic context to anchor a decode. The tags we DID catch (KEV7N, Bassdoctor) are both full conversational sentences in a normal register. => Automated tag detection will systematically miss the stylized tags; these need the user's ear or a different approach (e.g. audio-fingerprint matching a known tag clip across mixes).",
+      "known_but_uncaptured": [
+        "Lotus",
+        "V3NOM",
+        "LOKA",
+        "Astro",
+        "Havoc",
+        "TK ('it's the mf TK')",
+        "Kraken",
+        "TEG",
+        "XANDR",
+        "Rev7in",
+        "REAPER"
+      ]
+    }
+  }
+}

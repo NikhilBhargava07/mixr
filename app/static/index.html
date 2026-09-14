@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>mixr</title>
+<link rel="stylesheet" href="/style.css">
+<header>
+  <h1>mixr</h1>
+  <div class="transport">
+    <button id="play">Play</button>
+    <button id="stop" class="ghost">Stop</button>
+    <button id="restart" class="ghost">⟲ Restart</button>
+    <span id="time" class="mono">0:00</span>
+    <button id="zoomOut" class="ghost">−</button>
+    <button id="zoomIn" class="ghost">+</button>
+    <label class="toggle"><input type="checkbox" id="snap" checked> snap to bars</label>
+    <button id="export" class="ghost">⤓ Export</button>
+    <button id="undo" class="ghost" title="Undo (⌘Z)">↶</button>
+    <button id="redo" class="ghost" title="Redo (⇧⌘Z)">↷</button>
+    <button id="newProj" class="ghost">New</button>
+    <button id="save" class="ghost">Save</button>
+    <button id="open" class="ghost">Open ▾</button>
+    <span id="projName" class="proj">—</span>
+    <span id="saved" class="saved"></span>
+    <span id="status"></span>
+  </div>
+</header>
+<main>
+  <aside id="browser"></aside>
+  <section id="stage">
+    <canvas id="timeline"></canvas>
+    <p class="hint">
+      click a file to add it as a track · right-click a track or clip for options · drag clips to move · drag clip edges to trim
+      · S = split at playhead · ⌘Z = undo · space = play/pause · delete = remove clip · click M/S to mute/solo · drag the volume bar
+    </p>
+  </section>
+</main>
+<div id="menu"></div>
+<script src="/app.js"></script>

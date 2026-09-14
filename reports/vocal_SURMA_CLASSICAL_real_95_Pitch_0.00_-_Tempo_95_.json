@@ -1,0 +1,35 @@
+{
+  "file": "SURMA_CLASSICAL_real_95_Pitch_0.00_-_Tempo_95_",
+  "vocal_coverage": 0.466,
+  "vocal_onsets_per_active_sec": 1.56,
+  "vocal_hist_12bin": [
+    0.0777,
+    0.0,
+    0.1859,
+    0.0714,
+    0.016,
+    0.0763,
+    0.0511,
+    0.0,
+    0.173,
+    0.0177,
+    0.0,
+    0.3307
+  ],
+  "drum_hist_12bin": [
+    0.0904,
+    0.0,
+    0.0,
+    0.0345,
+    0.0254,
+    0.2963,
+    0.0,
+    0.0225,
+    0.118,
+    0.0082,
+    0.0,
+    0.4047
+  ],
+  "vocal_drum_cosine": 0.808,
+  "vocal_lock_to_drum_grid": 0.72
+}

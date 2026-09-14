@@ -1,0 +1,149 @@
+{
+  "file": "Shershaah_Intro_2026",
+  "duration_sec": 83.75,
+  "tempo_global_bpm": 152.0,
+  "tempo_dynamic_median": 143.6,
+  "tempo_dynamic_range": [
+    76.0,
+    161.5
+  ],
+  "n_beats": 207,
+  "key_global": {
+    "key": "G# minor",
+    "confidence": 0.405,
+    "runner_up": "A major"
+  },
+  "perc_ratio_global": 0.311,
+  "sections": [
+    {
+      "start": 0.42,
+      "end": 13.12,
+      "tempo_median": 152.0,
+      "key": {
+        "key": "C# minor",
+        "confidence": 0.707,
+        "runner_up": "A major"
+      },
+      "rms_mean": 0.1404,
+      "perc_ratio": 0.251,
+      "brightness_hz": 2042.0
+    },
+    {
+      "start": 13.12,
+      "end": 40.15,
+      "tempo_median": 76.0,
+      "key": {
+        "key": "G# minor",
+        "confidence": 0.529,
+        "runner_up": "E major"
+      },
+      "rms_mean": 0.2888,
+      "perc_ratio": 0.374,
+      "brightness_hz": 3012.0
+    },
+    {
+      "start": 40.15,
+      "end": 53.22,
+      "tempo_median": 143.6,
+      "key": {
+        "key": "A major",
+        "confidence": 0.444,
+        "runner_up": "A minor"
+      },
+      "rms_mean": 0.3383,
+      "perc_ratio": 0.361,
+      "brightness_hz": 3218.0
+    },
+    {
+      "start": 53.22,
+      "end": 59.77,
+      "tempo_median": 143.6,
+      "key": {
+        "key": "F# minor",
+        "confidence": 0.491,
+        "runner_up": "D# minor"
+      },
+      "rms_mean": 0.3801,
+      "perc_ratio": 0.155,
+      "brightness_hz": 849.0
+    },
+    {
+      "start": 59.77,
+      "end": 61.77,
+      "tempo_median": 152.0,
+      "key": {
+        "key": "D# major",
+        "confidence": 0.703,
+        "runner_up": "G# major"
+      },
+      "rms_mean": 0.1747,
+      "perc_ratio": 0.592,
+      "brightness_hz": 2958.0
+    },
+    {
+      "start": 61.77,
+      "end": 68.71,
+      "tempo_median": 152.0,
+      "key": {
+        "key": "G# minor",
+        "confidence": 0.31,
+        "runner_up": "D# major"
+      },
+      "rms_mean": 0.3795,
+      "perc_ratio": 0.304,
+      "brightness_hz": 3866.0
+    },
+    {
+      "start": 68.71,
+      "end": 70.38,
+      "tempo_median": 143.6,
+      "key": {
+        "key": "G# major",
+        "confidence": 0.531,
+        "runner_up": "G# minor"
+      },
+      "rms_mean": 0.2074,
+      "perc_ratio": 0.409,
+      "brightness_hz": 2676.0
+    },
+    {
+      "start": 70.38,
+      "end": 72.82,
+      "tempo_median": 152.0,
+      "key": {
+        "key": "D# minor",
+        "confidence": 0.313,
+        "runner_up": "F# minor"
+      },
+      "rms_mean": 0.3729,
+      "perc_ratio": 0.285,
+      "brightness_hz": 3649.0
+    },
+    {
+      "start": 72.82,
+      "end": 78.14,
+      "tempo_median": 143.6,
+      "key": {
+        "key": "G# minor",
+        "confidence": 0.411,
+        "runner_up": "G# major"
+      },
+      "rms_mean": 0.4011,
+      "perc_ratio": 0.237,
+      "brightness_hz": 3492.0
+    },
+    {
+      "start": 78.14,
+      "end": 83.75,
+      "tempo_median": 129.2,
+      "key": {
+        "key": "C# minor",
+        "confidence": 0.307,
+        "runner_up": "D minor"
+      },
+      "rms_mean": 0.3784,
+      "perc_ratio": 0.24,
+      "brightness_hz": 2503.0
+    }
+  ]
+}
