@@ -27,24 +27,31 @@ const api = async (path, opts) => {
 const post = (path, body) =>
   api(path, { method: "POST", headers: { "Content-Type": "application/json" },
               body: body === undefined ? undefined : JSON.stringify(body) });
-const key = (c) => `${c.source}/${c.file}`;
+// A clip's audio is identified by its file AND its warp: the same song at two
+// tempos is two different files on the server, with two different waveforms.
+const warpOf = (c) => ({ stretch: c.stretch ?? 1, pitch: c.pitch ?? 0 });
+const key = (c) => { const w = warpOf(c); return `${c.source}/${c.file}@${w.stretch}/${w.pitch}`; };
+const audioQuery = (c) => {
+  const w = warpOf(c);
+  return `source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}` +
+         `&stretch=${w.stretch}&pitch=${w.pitch}`;
+};
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 
-async function getWave(source, file) {
-  const k = `${source}/${file}`;
-  if (!waveCache.has(k)) {
-    const q = `source=${encodeURIComponent(source)}&name=${encodeURIComponent(file)}`;
-    waveCache.set(k, await api(`/api/waveform?${q}&buckets=1600`));
-  }
+// Both take a clip (or anything with source/file and optional stretch/pitch).
+// The first request for a new warp makes the server run Rubber Band, ~5s.
+async function getWave(c) {
+  const k = key(c);
+  if (!waveCache.has(k)) waveCache.set(k, await api(`/api/waveform?${audioQuery(c)}&buckets=1600`));
   return waveCache.get(k);
 }
-async function getBuffer(source, file) {
-  const k = `${source}/${file}`;
+async function getBuffer(c) {
+  const k = key(c);
   if (!bufCache.has(k)) {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    const q = `source=${encodeURIComponent(source)}&name=${encodeURIComponent(file)}`;
-    const ab = await fetch(`/api/audio?${q}`).then(r => r.arrayBuffer());
-    bufCache.set(k, await actx.decodeAudioData(ab));
+    const r = await fetch(`/api/audio?${audioQuery(c)}`);
+    if (!r.ok) throw new Error(`audio ${r.status}`);
+    bufCache.set(k, await actx.decodeAudioData(await r.arrayBuffer()));
   }
   return bufCache.get(k);
 }
@@ -129,7 +136,7 @@ async function addAsTrack(source, file) {
   const { track } = await post(`/api/track/add?name=${encodeURIComponent(nice)}`);
   const r = await post(`/api/clip/add?track=${track}`, { source, file, start: 0 });
   project = r.project;
-  await getWave(source, file);
+  await getWave({ source, file });
   // adopt the first track's grid as the project grid
   if (!project.downbeats.length) {
     const q = `source=${encodeURIComponent(source)}&name=${encodeURIComponent(file)}`;
@@ -215,7 +222,9 @@ function render() {
       drawFades(g, c, cx, cw, y + 4, TRACK_H - 12, isSel);
 
       g.fillStyle = "#cfd6e4"; g.font = "10px system-ui";
-      g.fillText(c.name.slice(0, 28), cx + 6, y + 16);
+      const s = c.stretch ?? 1;
+      g.fillText(c.name.slice(0, 28) + (Math.abs(s - 1) > 1e-4 ? `  ·  ${(100 / s).toFixed(1)}% speed` : ""),
+                 cx + 6, y + 16);
     }
   });
 
@@ -306,37 +315,47 @@ function currentTime() {
   return playOffset + (actx.currentTime - playStart);
 }
 
+let starting = false;   // true while play() is waiting on buffers
+
 async function play() {
-  if (!project || playing) return;
+  if (!project || playing || starting) return;   // a second press mid-load would double the audio
   follow = true;      // pressing play means "show me what's playing"
   actx = actx || new (window.AudioContext || window.webkitAudioContext)();
   await actx.resume();
   const t0 = playOffset;
+  const soloed = project.tracks.some(t => t.solo);
+  const jobs = [];
+  for (const tr of project.tracks) {
+    if (tr.mute || (soloed && !tr.solo)) continue;
+    for (const c of tr.clips) if (c.start + c.length > t0) jobs.push({ tr, c });
+  }
+  const pending = jobs.filter(j => !bufCache.has(key(j.c))).length;
+  if (pending) setStatus(`loading ${pending} clip${pending > 1 ? "s" : ""}…`);
+  starting = true;
+  try { await Promise.all(jobs.map(j => getBuffer(j.c))); }
+  catch (e) { setStatus(`can't play: ${e.message}`); return; }
+  finally { starting = false; }
+  if (pending) setStatus("ready");
+
   playStart = actx.currentTime;
   playing = true;
   liveNodes = [];
 
-  for (const tr of project.tracks) {
-    if (tr.mute) continue;
-    const soloed = project.tracks.some(t => t.solo);
-    if (soloed && !tr.solo) continue;
-    for (const c of tr.clips) {
-      if (c.end <= t0) continue;
-      const buf = await getBuffer(c.source, c.file);
-      const src = actx.createBufferSource();
-      src.buffer = buf;
-      const gain = actx.createGain();
-      gain.gain.value = tr.volume * c.gain;
-      const pan = actx.createStereoPanner();
-      pan.pan.value = tr.pan;
-      src.connect(gain).connect(pan).connect(actx.destination);
+  for (const { tr, c } of jobs) {
+    const buf = bufCache.get(key(c));
+    const src = actx.createBufferSource();
+    src.buffer = buf;
+    const gain = actx.createGain();
+    gain.gain.value = tr.volume * c.gain;
+    const pan = actx.createStereoPanner();
+    pan.pan.value = tr.pan;
+    src.connect(gain).connect(pan).connect(actx.destination);
 
-      const when = Math.max(0, c.start - t0);          // seconds from now
-      const into = c.offset + Math.max(0, t0 - c.start);
-      const dur = c.length - Math.max(0, t0 - c.start);
-      if (dur > 0) src.start(playStart + when, into, dur);
-      liveNodes.push(src);
-    }
+    const when = Math.max(0, c.start - t0);          // seconds from now
+    const into = c.offset + Math.max(0, t0 - c.start);
+    const dur = c.length - Math.max(0, t0 - c.start);
+    if (dur > 0) src.start(playStart + when, into, dur);
+    liveNodes.push(src);
   }
   $("play").textContent = "Pause";
   tick();
@@ -651,10 +670,10 @@ async function doRedo() {
 async function ensureWaves() {
   const seen = new Set();
   for (const tr of project.tracks) for (const c of tr.clips) {
-    const k = `${c.source}/${c.file}`;
+    const k = key(c);
     if (seen.has(k) || waveCache.has(k)) continue;
     seen.add(k);
-    try { await getWave(c.source, c.file); render(); } catch (e) {}
+    try { await getWave(c); render(); } catch (e) {}
   }
 }
 
@@ -693,10 +712,10 @@ async function openProjectByName(file) {
   const seen = new Set();
   for (const tr of project.tracks) {
     for (const c of tr.clips) {
-      const k = `${c.source}/${c.file}`;
+      const k = key(c);
       if (seen.has(k)) continue;
       seen.add(k);
-      try { await getWave(c.source, c.file); } catch (e) { /* missing file */ }
+      try { await getWave(c); } catch (e) { /* missing file */ }
       render();
     }
   }
@@ -900,6 +919,59 @@ function trackMenu(tr, px, py) {
   ], tr.name);
 }
 
+// Change a clip's warp and wait for the server to build the stretched audio.
+// The server rescales offset/length itself (see /api/clip/update), so this
+// only sends the new numbers, then fetches the new waveform. That fetch is what
+// makes the server run Rubber Band, so when it returns, playback is instant.
+async function applyWarp(tr, c, warp) {
+  setStatus("warping… (~5s for a full song)");
+  try {
+    project = await post(`/api/clip/update?track=${tr.id}&clip=${c.id}`, warp);
+    render();                                    // new length draws immediately
+    const fresh = project.tracks.find(t => t.id === tr.id).clips.find(x => x.id === c.id);
+    await getWave(fresh);
+    render();
+    setStatus(`${fresh.name}: ${(100 / fresh.stretch).toFixed(1)}% speed`);
+  } catch (e) {
+    setStatus(`warp failed: ${e.message}`);
+  }
+}
+
+/* ============================================================================
+   YOUR TURN — matchProjectTempo(tr, c)
+
+   Goal: stretch clip `c` so its tempo equals the project's tempo.
+
+   What you have:
+     project.bpm        the project tempo (adopted from the first track added)
+     await api(`/api/analyze?source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}`)
+                        analysis of the ORIGINAL file. Returns an object with
+                        .bpm and .bpm_from_downbeats (either can be null).
+                        addAsTrack prefers bpm_from_downbeats, so do the same.
+     applyWarp(tr, c, { stretch })
+                        sends it to the server and waits for the audio.
+
+   The one thing to get right: `stretch` is a DURATION ratio.
+     stretch > 1  → clip gets LONGER → plays SLOWER
+     stretch < 1  → clip gets SHORTER → plays FASTER
+   Sanity check before you trust your formula: PTTR is ~100 BPM. Matching it
+   to a 93 BPM jhummar project has to make it slower. Does yours give > 1?
+
+   Also note: stretch is relative to the ORIGINAL file, not to the clip's
+   current stretch — so matching twice must give the same answer, not
+   compound.
+
+   Handle these (each is one `if` + setStatus + return):
+     1. the analysis has no tempo
+     2. the clip is already at project tempo (don't warp for nothing)
+     3. the ratio is outside 0.5–2.0 — the server will refuse it. This usually
+        means the detector heard half- or double-time (e.g. 84 vs 168), so
+        a nicer version halves/doubles clipBpm until it's in range.
+   ========================================================================== */
+async function matchProjectTempo(tr, c) {
+  setStatus("matchProjectTempo isn't written yet — see the YOUR TURN block in app.js");
+}
+
 function clipMenu(tr, c, px, py) {
   const at = currentTime();
   const canSplit = c.start + 0.05 < at && at < c.start + c.length - 0.05;
@@ -917,8 +989,13 @@ function clipMenu(tr, c, px, py) {
     { label: "Duplicate", run: async () => {
         const r = await post(`/api/clip/add?track=${tr.id}`, {
           source: c.source, file: c.file, name: c.name,
-          start: c.start + c.length, offset: c.offset, length: c.length });
+          start: c.start + c.length, offset: c.offset, length: c.length,
+          stretch: c.stretch, pitch: c.pitch });
         project = r.project; render(); } },
+    { sep: true },
+    { label: "Match project tempo", run: () => matchProjectTempo(tr, c) },
+    { label: "Reset speed", disabled: Math.abs((c.stretch ?? 1) - 1) < 1e-4,
+      run: () => applyWarp(tr, c, { stretch: 1 }) },
     { sep: true },
     { label: "Delete clip", danger: true, key: "⌫", run: async () => {
         project = await post(`/api/clip/remove?track=${tr.id}&clip=${c.id}`);
@@ -985,9 +1062,10 @@ async function separateStems(tr) {
       // align to the original clip, and inherit its trim
       const r = await post(`/api/clip/add?track=${tid}`, {
         source: "stems", file: rel, name: part,
-        start: c.start, offset: c.offset, length: c.length });
+        start: c.start, offset: c.offset, length: c.length,
+        stretch: c.stretch, pitch: c.pitch });
       project = r.project;
-      await getWave("stems", rel);
+      await getWave({ source: "stems", file: rel, ...warpOf(c) });
       render();
     }
     // the original is now redundant — mute rather than delete, so it's recoverable
@@ -1112,6 +1190,8 @@ function setStatus(s) { $("status").textContent = s; }
     } catch (e) { setStatus("click a file to add it as a track"); }
   } else {
     lastAutosave = JSON.stringify(project);
+    setStatus("loading waveforms…");
+    await ensureWaves();       // a reload used to leave every clip blank
     setStatus("ready");
   }
 })();

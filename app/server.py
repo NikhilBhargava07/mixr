@@ -106,6 +106,23 @@ def _resolve(source: str, name: str) -> Path:
     return p
 
 
+STRETCH_RANGE = (0.5, 2.0)     # half speed .. double speed
+PITCH_RANGE = (-12.0, 12.0)    # an octave either way
+
+
+def _check_warp(stretch: float, pitch: float):
+    if not STRETCH_RANGE[0] <= stretch <= STRETCH_RANGE[1]:
+        raise HTTPException(400, f"stretch must be within {STRETCH_RANGE}")
+    if not PITCH_RANGE[0] <= pitch <= PITCH_RANGE[1]:
+        raise HTTPException(400, f"pitch must be within {PITCH_RANGE}")
+
+
+def _audio_path(source: str, name: str, stretch: float = 1.0, pitch: float = 0.0) -> Path:
+    """The file a clip actually plays: the original, or its warped copy."""
+    _check_warp(stretch, pitch)
+    return audio.warped(_resolve(source, name), round(stretch, 5), round(pitch, 3))
+
+
 # ------------------------------------------------------------------ browsing
 @app.get("/api/sources")
 def list_sources():
@@ -139,8 +156,9 @@ async def import_media(file: UploadFile = File(...)):
 
 
 @app.get("/api/waveform")
-def get_waveform(source: str, name: str, buckets: int = 2000):
-    return audio.waveform(_resolve(source, name), buckets=buckets)
+def get_waveform(source: str, name: str, buckets: int = 2000,
+                 stretch: float = 1.0, pitch: float = 0.0):
+    return audio.waveform(_audio_path(source, name, stretch, pitch), buckets=buckets)
 
 
 @app.get("/api/analyze")
@@ -149,8 +167,8 @@ def get_analysis(source: str, name: str):
 
 
 @app.get("/api/audio")
-def get_audio(source: str, name: str):
-    wav = audio.to_wav(_resolve(source, name))
+def get_audio(source: str, name: str, stretch: float = 1.0, pitch: float = 0.0):
+    wav = _audio_path(source, name, stretch, pitch)
     return FileResponse(wav, media_type="audio/wav", filename=wav.name)
 
 
@@ -235,7 +253,9 @@ def add_clip(track: str, payload: dict = Body(...)):
                    source=payload["source"], file=payload["file"],
                    start=float(payload.get("start", 0.0)),
                    offset=float(payload.get("offset", 0.0)),
-                   length=length)
+                   length=length,
+                   stretch=float(payload.get("stretch", 1.0)),
+                   pitch=float(payload.get("pitch", 0.0)))
     return {"clip": c.id, "project": p.to_dict()}
 
 
@@ -248,8 +268,19 @@ def update_clip(track: str, clip: str, payload: dict = Body(...)):
     c = t.clip(clip)
     if not c:
         raise HTTPException(404, "no such clip")
-    for k in ("start", "offset", "length", "gain", "fade_in", "fade_out",
-              "stretch", "pitch", "name"):
+    if "stretch" in payload or "pitch" in payload:
+        new_s = round(float(payload.get("stretch", c.stretch)), 5)
+        new_p = round(float(payload.get("pitch", c.pitch)), 3)
+        _check_warp(new_s, new_p)
+        # offset and length are measured on the STRETCHED file. Changing the
+        # stretch rescales that file, so the same musical window moves and
+        # resizes by exactly the same ratio. start stays put: the clip grows
+        # or shrinks from its left edge, the way every DAW does it.
+        ratio = new_s / c.stretch
+        c.offset *= ratio
+        c.length *= ratio
+        c.stretch, c.pitch = new_s, new_p
+    for k in ("start", "offset", "length", "gain", "fade_in", "fade_out", "name"):
         if k in payload:
             setattr(c, k, payload[k])
     t.clips.sort(key=lambda x: x.start)

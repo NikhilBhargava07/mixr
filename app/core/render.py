@@ -16,6 +16,8 @@ import numpy as np
 import soundfile as sf
 import librosa
 
+from . import audio
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 # Exports land in mixes/ — that folder IS the "Mixes" category in the sidebar,
 # so anything you bounce shows up there immediately. renders/ stays for the
@@ -41,6 +43,21 @@ def _fade(n: int, fade_in: float, fade_out: float, sr: int) -> np.ndarray:
     return env
 
 
+def _pan(y: np.ndarray, pan: float) -> np.ndarray:
+    """Exactly what the browser's StereoPannerNode does to a stereo signal
+    (Web Audio spec, "StereoPannerNode" processing). At pan 0 it is a
+    pass-through. The constant-power law this replaced pulled every centred
+    track down 3 dB, so exports came out quieter than what you mixed to."""
+    if abs(pan) < 1e-6:
+        return y
+    L, R = y[0], y[1]
+    if pan <= 0:
+        x = (pan + 1.0) * np.pi / 2               # pan left: fold R into L
+        return np.stack([L + R * np.cos(x), R * np.sin(x)])
+    x = pan * np.pi / 2                           # pan right: fold L into R
+    return np.stack([L * np.cos(x), R + L * np.sin(x)])
+
+
 def render_project(project, resolve, sr: int = 44100, normalize: bool = True,
                    progress=None) -> np.ndarray:
     """resolve(source, file) -> Path, injected so this module doesn't need to
@@ -56,26 +73,21 @@ def render_project(project, resolve, sr: int = 44100, normalize: bool = True,
     done = 0
 
     for tr in tracks:
-        # constant-power pan: keeps perceived loudness steady across the field
-        l_gain = np.sqrt(0.5 * (1.0 - tr.pan))
-        r_gain = np.sqrt(0.5 * (1.0 + tr.pan))
         for c in tr.clips:
             if c.length <= 0:
                 continue
-            path = resolve(c.source, c.file)
+            # Read the same (possibly warped) file the browser plays, with
+            # offset/length measured on it — so export matches preview exactly.
+            path = audio.warped(resolve(c.source, c.file), c.stretch, c.pitch)
             y, _ = librosa.load(path, sr=sr, mono=False,
                                 offset=max(0.0, c.offset), duration=c.length)
             if y.ndim == 1:
                 y = np.stack([y, y])
 
-            if abs(c.stretch - 1.0) > 1e-6 or abs(c.pitch) > 1e-6:
-                y = _warp(y, sr, c.stretch, c.pitch)
-
             m = y.shape[1]
             y = y * _fade(m, c.fade_in, c.fade_out, sr)
             y = y * (c.gain * tr.volume)
-            y[0] *= l_gain
-            y[1] *= r_gain
+            y = _pan(y, tr.pan)
 
             s = int(c.start * sr)
             e = min(n, s + m)
@@ -91,27 +103,6 @@ def render_project(project, resolve, sr: int = 44100, normalize: bool = True,
         if peak > 1.0:
             mix *= 0.98 / peak                   # only pull down if clipping
     return mix
-
-
-def _warp(y, sr, stretch, semitones):
-    """Rubber Band when available (DAW-grade), phase vocoder as fallback."""
-    try:
-        import pyrubberband as pyrb
-        out = y
-        if abs(stretch - 1.0) > 1e-6:
-            out = np.stack([pyrb.time_stretch(ch, sr, 1.0 / stretch) for ch in out])
-        if abs(semitones) > 1e-6:
-            out = np.stack([pyrb.pitch_shift(ch, sr, semitones) for ch in out])
-        return out.astype(np.float32)
-    except Exception:
-        out = y
-        if abs(stretch - 1.0) > 1e-6:
-            out = np.stack([librosa.effects.time_stretch(np.ascontiguousarray(ch),
-                                                         rate=1.0 / stretch) for ch in out])
-        if abs(semitones) > 1e-6:
-            out = np.stack([librosa.effects.pitch_shift(np.ascontiguousarray(ch),
-                                                        sr=sr, n_steps=semitones) for ch in out])
-        return out.astype(np.float32)
 
 
 def start(project, resolve, name: str, fmt: str = "wav") -> str:

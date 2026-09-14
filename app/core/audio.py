@@ -8,6 +8,7 @@ not duplicated here.
 import hashlib
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -36,6 +37,38 @@ def to_wav(src: Path) -> Path:
     if not out.exists():
         subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@44100", "-c", "2",
                         str(src), str(out)], check=True, capture_output=True)
+    return out
+
+
+# One lock per warp output: the browser asks for a stretched clip's waveform
+# and its audio at nearly the same moment, and both would otherwise launch
+# Rubber Band and write the same file.
+_warp_locks: dict[str, threading.Lock] = {}
+_warp_guard = threading.Lock()
+
+
+def warped(path: Path, stretch: float = 1.0, pitch: float = 0.0) -> Path:
+    """The whole file, time-stretched and/or pitch-shifted, as a cached WAV.
+
+    `stretch` is a DURATION ratio: 1.075 makes the audio 7.5% longer, i.e.
+    slower. That's Rubber Band's -t flag, verbatim.
+
+    Preview and export both read this exact file, so what you hear in the
+    browser is sample-for-sample what gets rendered. R2 (the default engine)
+    takes ~5s for a 4-minute song; R3 (-3) sounds finer but takes ~25s, too
+    slow to wait on every tempo change.
+    """
+    if abs(stretch - 1.0) < 1e-6 and abs(pitch) < 1e-6:
+        return to_wav(path)
+    out = CACHE / f"warp_{_key(path)}_{stretch:.5f}_{pitch:+.3f}.wav"
+    with _warp_guard:
+        lock = _warp_locks.setdefault(out.name, threading.Lock())
+    with lock:
+        if not out.exists():
+            tmp = out.with_name(out.stem + ".part.wav")   # never serve half a file
+            subprocess.run(["rubberband", "-q", "-t", f"{stretch:.5f}", "-p", f"{pitch:.3f}",
+                            str(to_wav(path)), str(tmp)], check=True, capture_output=True)
+            tmp.replace(out)
     return out
 
 

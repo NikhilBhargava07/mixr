@@ -44,8 +44,9 @@ class Clip:
     gain: float = 1.0         # linear, 1.0 = unity
     fade_in: float = 0.01     # seconds — a tiny default fade avoids clicks
     fade_out: float = 0.01
-    # warping: if set, the clip is time-stretched by this ratio on render
-    stretch: float = 1.0      # 1.0 = original speed; 0.95 = 5% slower
+    # warping: the clip plays a stretched copy of its file, and offset/length
+    # are measured on THAT copy. See /api/clip/update for the rescale rule.
+    stretch: float = 1.0      # DURATION ratio: 1.075 = 7.5% longer (slower)
     pitch: float = 0.0        # semitones
 
     @property
