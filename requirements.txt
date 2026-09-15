@@ -1,0 +1,25 @@
+# --- web server
+fastapi==0.141.1
+uvicorn==0.52.3
+python-multipart==0.0.32      # multipart form parsing for media import
+
+# --- audio analysis
+librosa==0.11.0
+numpy==2.4.6
+scipy==1.17.1
+soundfile==0.14.0
+certifi==2026.7.22            # beat_this downloads checkpoints over HTTPS
+
+# --- separation / beat tracking / transcription
+demucs==4.1.0                 # stem separation
+beat-this==1.1.0              # transformer downbeat tracker
+faster-whisper==1.2.1         # lyric transcription (analysis only)
+torch==2.13.0
+
+# --- time-stretch / effects
+pyrubberband==0.4.0           # needs the `rubberband` CLI on PATH
+pedalboard==0.9.24            # installed, not wired up yet
+
+# Also required, outside pip:
+#   brew install rubberband
+#   macOS `afconvert` (ships with the OS) for format conversion
