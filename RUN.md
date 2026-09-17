@@ -24,6 +24,11 @@ just refresh the page.
 - double-click a clip's bottom strip to drop a warp pin, drag a pin to warp the
   audio around it, alt-click a pin to remove it
 
+Warped audio is cached under `app/_cache/`, which holds nothing but rebuildable
+files — clearing it never touches your projects (`app/_projects/`), stems
+(`app/_stems/`) or exported mixes (`mixes/`). It caps itself at 2 GB, and
+**Open ▸ Free up disk** clears it by hand.
+
 ## Where things live
 ```
 app/server.py          the API — thin wrappers, no logic

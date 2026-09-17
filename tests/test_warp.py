@@ -120,6 +120,25 @@ def test_key_parsing_and_transposition():
     assert warp.semitones_between("C major", "") is None
 
 
+
+
+def test_window_snaps_outward_and_is_stable_under_small_edits():
+    a = warp.window_for(32.0, 20.0)
+    assert a == (15.0, 60.0)                       # 27 -> 15, 57 -> 60
+    assert warp.window_for(33.5, 19.0) == a        # a small trim reuses it
+    assert warp.window_for(3.0, 5.0) == (0.0, 15.0)   # never before the file
+
+
+def test_sub_map_rebases_both_axes():
+    pins = [[0, 0], [4, 5], [8.5, 9.5]]
+    m, base = warp.sub_map(pins, 2.0, 6.0)
+    assert close(base, 2.5)                        # dst of the slice's start
+    assert m[0] == [0.0, 0.0]
+    assert close(m[-1][0], 4.0) and close(m[-1][1], warp.src_to_dst(pins, 6.0) - base)
+    # a point inside the slice keeps its place relative to the slice
+    assert close(warp.src_to_dst(m, 4.0 - 2.0), warp.src_to_dst(pins, 4.0) - base)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in dict(globals()).items() if k.startswith("test_")]
     for f in fns:

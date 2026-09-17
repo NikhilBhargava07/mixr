@@ -29,7 +29,7 @@ analysis learned to *suggest* arrangements, not just host them.
 |---|---|
 | **Arrange** | multi-track timeline, drag to move, trim clip edges, split at playhead, snap to real bar lines |
 | **Shape** | per-clip gain and fades with drag handles, track volume, pan, mute/solo |
-| **Warp** | warp maps (pins from source time to timeline time) rendered by Rubber Band; Beats mode keeps hits within ~4 ms of the pins; preview is sample-for-sample identical to the export |
+| **Warp** | warp maps (pins from source time to timeline time) rendered by Rubber Band; Beats mode keeps hits within ~4 ms of the pins; only the stretch a clip uses is rendered, so edits land in ~1.5 s instead of ~17 s |
 | **Beat-match** | match a clip to the project tempo, or pin every detected bar to the grid (95% of bars land within 20 ms); drag, add and delete warp pins by hand |
 | **Key** | detect a clip's key and transpose it into the project's, by the shortest path |
 | **Stems** | 4-way source separation (Demucs) from the clip menu |
@@ -56,8 +56,8 @@ A few decisions that shaped everything else:
   pins; a plain stretch is just two pins. The maths is pure and tested
   (`app/core/warp.py`, `tests/`), and warp accuracy is *measured* on a click
   track rather than assumed (`tests/warp_accuracy.py`).
-- **Preview must equal export.** Warped clips play the same cached stretched
-  file the renderer reads, and the offline renderer mirrors the Web Audio graph
+- **Preview must equal export.** Warped clips play the same cached window the
+  renderer reads — verified in-browser as bit-identical (max sample difference 0), and the offline renderer mirrors the Web Audio graph
   node for node — including copying `StereoPannerNode`'s pan law exactly.
 
 ## Running it

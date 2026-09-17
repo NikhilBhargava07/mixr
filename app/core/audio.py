@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import librosa
+import soundfile as sf
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 CACHE = ROOT / "app" / "_cache"
@@ -38,6 +39,73 @@ def to_wav(src: Path) -> Path:
         subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@44100", "-c", "2",
                         str(src), str(out)], check=True, capture_output=True)
     return out
+
+
+# The cache holds only things that can be rebuilt: format conversions, warp
+# renders, waveform pictures, analysis results. Nothing here is user work —
+# projects live in app/_projects, stems in app/_stems, mixes in mixes/. So it
+# is always safe to delete; the only cost is rebuilding.
+CACHE_LIMIT = 2_000_000_000        # ~2 GB, then the oldest renders go
+
+
+def cache_stats() -> dict:
+    files = [f for f in CACHE.glob("*") if f.is_file()]
+    by = {}
+    for f in files:
+        kind = ("warp render" if f.name.startswith(("warp_", "win_"))
+                else "converted audio" if f.suffix == ".wav"
+                else "waveform" if f.name.startswith("wave_")
+                else "analysis")
+        e = by.setdefault(kind, {"files": 0, "bytes": 0})
+        e["files"] += 1
+        e["bytes"] += f.stat().st_size
+    return {"bytes": sum(f.stat().st_size for f in files), "files": len(files),
+            "limit": CACHE_LIMIT, "by_kind": by}
+
+
+def prune_cache(limit: int = None, now: float = None) -> int:
+    """Drop the least recently used files until the cache fits. Returns bytes freed.
+
+    Files touched in the last minute are left alone: a render may still be
+    writing them, or a clip may be about to play them.
+    """
+    import time
+    limit = CACHE_LIMIT if limit is None else limit
+    now = time.time() if now is None else now
+    files = sorted((f for f in CACHE.glob("*") if f.is_file()),
+                   key=lambda f: f.stat().st_mtime)
+    total = sum(f.stat().st_size for f in files)
+    freed = 0
+    for f in files:
+        if total - freed <= limit:
+            break
+        if now - f.stat().st_mtime < 60:
+            continue
+        size = f.stat().st_size
+        try:
+            f.unlink()
+            freed += size
+        except OSError:
+            pass
+    return freed
+
+
+def clear_cache(kind: str = "renders") -> int:
+    """Delete cached audio. 'renders' keeps analysis and waveforms (cheap to
+    keep, slow to recompute); 'all' empties the lot."""
+    freed = 0
+    for f in CACHE.glob("*"):
+        if not f.is_file():
+            continue
+        if kind == "renders" and not (f.name.startswith(("warp_", "win_")) or f.suffix == ".wav"):
+            continue
+        size = f.stat().st_size
+        try:
+            f.unlink()
+            freed += size
+        except OSError:
+            pass
+    return freed
 
 
 # One lock per warp output: the browser asks for a stretched clip's waveform
@@ -86,7 +154,61 @@ def warped(path: Path, pins=(), pitch: float = 0.0, mode: str = "beats") -> Path
                 cmd += ["-D", f"{end:.6f}", "-M", str(mapfile)]
             subprocess.run(cmd + [str(src), str(tmp)], check=True, capture_output=True)
             tmp.replace(out)
+            prune_cache()
     return out
+
+
+def warped_window(path: Path, pins=(), pitch: float = 0.0, mode: str = "beats",
+                  offset: float = 0.0, length: float = 0.0):
+    """Warp only the stretch of a file that a clip actually plays.
+
+    Returns (wav path, base) where `base` is the warped-file time the returned
+    audio starts at — the caller subtracts it to find where a clip's offset
+    lands inside this file.
+
+    Preview and export both come through here with the same clip numbers, so
+    they get the same cached file and stay sample-for-sample identical. The
+    slice is padded well beyond the clip, so Rubber Band's edge behaviour never
+    lands inside the audio you actually hear.
+    """
+    from . import warp as W
+    pins = list(pins)
+    src = to_wav(path)
+    info = sf.info(str(src))
+    if not pins and abs(pitch) < 1e-6:
+        return src, 0.0
+
+    d0, d1 = W.window_for(offset, length)
+    s0 = max(0.0, W.dst_to_src(pins, d0))
+    s1 = min(info.duration, W.dst_to_src(pins, d1))
+    if s1 - s0 >= info.duration - 1e-6:                  # the whole file anyway
+        return warped(path, pins, pitch, mode), 0.0
+
+    sig = W.signature(pins, pitch, mode)
+    out = CACHE / f"win_{_key(path)}_{sig}_{s0:.3f}_{s1:.3f}.wav"
+    base = W.src_to_dst(pins, s0)
+    with _warp_guard:
+        lock = _warp_locks.setdefault(out.name, threading.Lock())
+    with lock:
+        if out.exists():
+            return out, base
+        sub, _ = W.sub_map(pins, s0, s1)
+        sr = info.samplerate
+        y, _ = sf.read(str(src), start=int(s0 * sr), stop=int(s1 * sr), always_2d=True)
+        slice_wav = out.with_name(out.stem + ".src.wav")
+        sf.write(slice_wav, y, sr)
+        mapfile = out.with_name(out.stem + ".map.txt")
+        mapfile.write_text("".join(f"{round(a * sr)} {round(b * sr)}\n" for a, b in sub))
+        cmd = ["rubberband", "-q", "-p", f"{pitch:.3f}"]
+        cmd += ["-c", "6"] if mode == "beats" else ["-F"]
+        tmp = out.with_name(out.stem + ".part.wav")
+        subprocess.run(cmd + ["-D", f"{sub[-1][1]:.6f}", "-M", str(mapfile),
+                              str(slice_wav), str(tmp)], check=True, capture_output=True)
+        tmp.replace(out)
+        slice_wav.unlink(missing_ok=True)
+        mapfile.unlink(missing_ok=True)
+        prune_cache()
+    return out, base
 
 
 def waveform(path: Path, buckets: int = 2000) -> dict:

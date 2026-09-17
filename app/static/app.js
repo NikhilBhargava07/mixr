@@ -39,9 +39,19 @@ const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(
 // warpOf() pulls out just those fields, so it can be copied onto new clips.
 const warpOf = (c) => ({ warp: c.warp || [], warp_mode: c.warp_mode || "beats", pitch: c.pitch || 0 });
 const isWarped = (c) => (c.warp && c.warp.length > 0) || Math.abs(c.pitch || 0) > 1e-6;
-const key = (c) => `${c.source}/${c.file}` + (isWarped(c) ? `@${JSON.stringify(warpOf(c))}` : "");
+const key = (c) => `${c.source}/${c.file}` +
+  (isWarped(c) ? `@${JSON.stringify(warpOf(c))}@${windowFor(c)}` : "");
 const plainQuery = (c) => `source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}`;
-const warpBody = (c, extra) => JSON.stringify({ source: c.source, name: c.file, ...warpOf(c), ...extra });
+// Must match WINDOW_PAD / WINDOW_STEP in app/core/warp.py. Only used for cache
+// keys here — the server computes the real window and reports where it starts.
+const WINDOW_PAD = 5, WINDOW_STEP = 15;
+const windowFor = (c) => [
+  Math.floor(Math.max(0, c.offset - WINDOW_PAD) / WINDOW_STEP) * WINDOW_STEP,
+  Math.ceil((c.offset + c.length + WINDOW_PAD) / WINDOW_STEP) * WINDOW_STEP,
+];
+const warpBody = (c, extra) => JSON.stringify({
+  source: c.source, name: c.file, ...warpOf(c),
+  offset: c.offset, length: c.length, ...extra });
 
 // Where a warp pin sits on the timeline. A pin is [src, dst] in warped-file
 // seconds; the clip shows the window [offset, offset+length) of that file.
@@ -92,7 +102,8 @@ async function getBuffer(c) {
                                          body: warpBody(c) })
       : await fetch(`/api/audio?${plainQuery(c)}`);
     if (!r.ok) throw new Error(`audio ${r.status}`);
-    bufCache.set(k, await actx.decodeAudioData(await r.arrayBuffer()));
+    const base = parseFloat(r.headers.get("X-Warp-Base") || "0") || 0;
+    bufCache.set(k, { buffer: await actx.decodeAudioData(await r.arrayBuffer()), base });
   }
   return bufCache.get(k);
 }
@@ -367,8 +378,9 @@ function drawPill(g, px, py, label, on, color) {
 function drawClipWave(g, wf, c, cx, cw, y, h, color) {
   const mid = y + h / 2, amp = h / 2 - 2;
   const n = wf.min.length;
-  const i0 = Math.floor((c.offset / wf.duration) * n);
-  const i1 = Math.ceil(((c.offset + c.length) / wf.duration) * n);
+  const base = wf.base || 0;
+  const i0 = Math.floor(((c.offset - base) / wf.duration) * n);
+  const i1 = Math.ceil(((c.offset - base + c.length) / wf.duration) * n);
   const span = Math.max(1, i1 - i0);
   g.fillStyle = color + "cc";
   const step = Math.max(1, Math.floor(span / Math.max(1, cw)));
@@ -416,9 +428,9 @@ async function play() {
   liveNodes = [];
 
   for (const { tr, c } of jobs) {
-    const buf = bufCache.get(key(c));
+    const { buffer, base } = bufCache.get(key(c));
     const src = actx.createBufferSource();
-    src.buffer = buf;
+    src.buffer = buffer;
     const gain = actx.createGain();
     gain.gain.value = tr.volume * c.gain;
     const pan = actx.createStereoPanner();
@@ -426,7 +438,8 @@ async function play() {
     src.connect(gain).connect(pan).connect(actx.destination);
 
     const when = Math.max(0, c.start - t0);          // seconds from now
-    const into = c.offset + Math.max(0, t0 - c.start);
+    // the rendered audio starts at `base` in warped-file time, not at 0
+    const into = Math.max(0, c.offset - base + Math.max(0, t0 - c.start));
     const dur = c.length - Math.max(0, t0 - c.start);
     if (dur > 0) src.start(playStart + when, into, dur);
     liveNodes.push(src);
@@ -829,6 +842,22 @@ async function openMenuProjects(px, py) {
       } catch (e) { setStatus(`delete failed: ${e.message}`); }
     }});
   }
+  // Disk. The cache is only rebuildable audio, so clearing it costs time, not
+  // work — worth saying out loud, since the number gets big.
+  try {
+    const cs = await api("/api/cache");
+    items.push({ sep: true });
+    items.push({ label: `Cache: ${(cs.bytes / 1e9).toFixed(2)} GB of rebuildable audio`,
+                 disabled: true });
+    items.push({ label: "Free up disk (keeps every project and stem)", run: async () => {
+      setStatus("clearing cached audio…");
+      const r = await post("/api/cache/clear?kind=renders");
+      bufCache.clear(); waveCache.clear();
+      await ensureWaves(); render();
+      setStatus(`freed ${(r.freed / 1e9).toFixed(2)} GB — clips will re-render as you play them`);
+    }});
+  } catch (e) { /* disk info is a nicety; never block opening a project */ }
+
   openMenu(px, py, items, "Projects");
 }
 

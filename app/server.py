@@ -171,28 +171,51 @@ def get_audio(source: str, name: str):
     return FileResponse(wav, media_type="audio/wav", filename=wav.name)
 
 
+@app.get("/api/cache")
+def cache_info():
+    return audio.cache_stats()
+
+
+@app.post("/api/cache/clear")
+def cache_clear(kind: str = "renders"):
+    """Safe by construction: this only touches app/_cache, which holds nothing
+    but rebuildable files. Projects, stems and exported mixes live elsewhere."""
+    return {"freed": audio.clear_cache(kind), **audio.cache_stats()}
+
+
 # ------------------------------------------------------------------ warp
 # POST because a warp map can hold hundreds of pins. The body carries the map
 # itself rather than a clip id, so the response depends only on the request —
 # the browser can cache by it, and nothing can change underneath mid-fetch.
-def _warped_path(body: dict) -> Path:
+def _warped_path(body: dict):
+    """(path, base) for a clip's audio. `base` is the warped-file time the
+    returned audio starts at; the browser subtracts it when scheduling."""
     pins, pitch, mode = _warp_args(body.get("warp"), body.get("pitch"),
                                    body.get("warp_mode", "beats"))
     try:
-        return audio.warped(_resolve(body["source"], body["name"]), pins, pitch, mode)
+        src = _resolve(body["source"], body["name"])
     except KeyError:
         raise HTTPException(400, "body needs source and name")
+    return audio.warped_window(src, pins, pitch, mode,
+                               float(body.get("offset", 0.0)),
+                               float(body.get("length", 0.0)))
 
 
 @app.post("/api/warp/audio")
 def warp_audio(body: dict = Body(...)):
-    wav = _warped_path(body)
-    return FileResponse(wav, media_type="audio/wav", filename=wav.name)
+    wav, base = _warped_path(body)
+    # the base rides along in a header so the audio body stays a plain WAV
+    return FileResponse(wav, media_type="audio/wav", filename=wav.name,
+                        headers={"X-Warp-Base": f"{base:.6f}",
+                                 "Access-Control-Expose-Headers": "X-Warp-Base"})
 
 
 @app.post("/api/warp/waveform")
 def warp_waveform(body: dict = Body(...)):
-    return audio.waveform(_warped_path(body), buckets=int(body.get("buckets", 2000)))
+    wav, base = _warped_path(body)
+    out = dict(audio.waveform(wav, buckets=int(body.get("buckets", 2000))))
+    out["base"] = base
+    return out
 
 
 # ------------------------------------------------------------------ stems

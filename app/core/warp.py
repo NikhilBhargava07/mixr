@@ -206,3 +206,33 @@ def semitones_between(from_key: str, to_key: str):
         return None
     d = (b[0] - a[0]) % 12
     return d - 12 if d > 6 else d
+
+
+# ---------------------------------------------------------------- windows
+# Warping a whole 4-minute song to hear a 20-second clip is most of the wait.
+# Rendering only the stretch a clip uses cuts that down, but the window has to
+# be STABLE: if it moved with every trim, every edit would re-render. So the
+# window is padded and then snapped outward to a grid, and small edits keep
+# landing on the same window — and therefore the same cached audio.
+WINDOW_PAD = 5.0      # seconds of audio kept either side of the clip
+WINDOW_STEP = 15.0    # window edges snap outward to this grid
+
+
+def window_for(offset: float, length: float):
+    """The (start, end) of the warped-file region a clip needs, in dst seconds."""
+    lo = max(0.0, offset - WINDOW_PAD)
+    hi = offset + length + WINDOW_PAD
+    return (float(int(lo / WINDOW_STEP) * WINDOW_STEP),
+            float(math.ceil(hi / WINDOW_STEP) * WINDOW_STEP))
+
+
+def sub_map(pins, s0: float, s1: float):
+    """Re-express a map for a SLICE of the source that starts at s0.
+
+    Both axes are rebased to the slice's own origin, so Rubber Band can treat
+    the slice as a file in its own right.
+    """
+    d0 = src_to_dst(pins, s0)
+    inner = [[a - s0, src_to_dst(pins, a) - d0] for a, b in _pairs(pins) if s0 < a < s1]
+    out = [[0.0, 0.0]] + inner + [[s1 - s0, src_to_dst(pins, s1) - d0]]
+    return out, d0

@@ -70,6 +70,29 @@ def main():
                       f"mean {e.mean():+6.1f} ms   worst {np.abs(e).max():5.1f} ms"
                       f"   (raw worst {np.abs(raw).max():4.1f})"
                       f"{'' if length_ok else '   LENGTH WRONG'}")
+        # Windowed renders warp only the stretch a clip uses. Needs a file
+        # long enough that the window is a real subset — otherwise the code
+        # falls back to warping the whole thing and this proves nothing.
+        print("-- windowed renders (only the clip's stretch is warped) --")
+        long_src = Path(d) / "long.wav"
+        long_times = click_track(long_src, n=240, every=0.5, first=0.25, dur=121.0)
+        long_base = errors_ms(long_src, long_times)
+        for name, pins in {"uniform 1.075 (slower)": warp.uniform(1.075),
+                           "uniform 0.9 (faster)": warp.uniform(0.9),
+                           "drift fix (4 pins)": warp.normalize(
+                               [[0, 0], [30, 31.5], [60, 61.0], [90, 92.0]])}.items():
+            out, base = audio.warped_window(long_src, pins, 0.0, "beats", 40.0, 20.0)
+            assert base > 0, "window should not cover the whole file"
+            exp = np.array([warp.src_to_dst(pins, t) for t in long_times])
+            dur = sf.info(str(out)).duration
+            inside = (exp >= base + 0.2) & (exp <= base + dur - 0.2)
+            e = errors_ms(out, exp[inside] - base) - long_base[inside]
+            ok = np.abs(e).max() <= TOL_MS
+            failed += not ok
+            print(f"{'PASS' if ok else 'FAIL'}  beats  {name:24s} "
+                  f"mean {e.mean():+6.1f} ms   worst {np.abs(e).max():5.1f} ms"
+                  f"   ({inside.sum()} clicks, window starts {base:.1f}s in)")
+
     print("all good" if not failed else f"{failed} failed")
     return failed
 
