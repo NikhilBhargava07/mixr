@@ -44,9 +44,11 @@ class Clip:
     gain: float = 1.0         # linear, 1.0 = unity
     fade_in: float = 0.01     # seconds — a tiny default fade avoids clicks
     fade_out: float = 0.01
-    # warping: the clip plays a stretched copy of its file, and offset/length
-    # are measured on THAT copy. See /api/clip/update for the rescale rule.
-    stretch: float = 1.0      # DURATION ratio: 1.075 = 7.5% longer (slower)
+    # warping: the clip plays a warped copy of its file, and offset/length are
+    # measured on THAT copy. `warp` is a list of [src, dst] pins in seconds —
+    # see app/core/warp.py. Empty = unwarped. A plain stretch is two pins.
+    warp: list = field(default_factory=list)
+    warp_mode: str = "beats"  # "beats" keeps transients on time; "tones" is smoother
     pitch: float = 0.0        # semitones
 
     @property
@@ -84,6 +86,15 @@ class Track:
 
     def clip(self, cid: str) -> Optional[Clip]:
         return next((c for c in self.clips if c.id == cid), None)
+
+
+def _migrate_clip(cd: dict) -> dict:
+    """Older projects stored a single `stretch` ratio; that's a two-pin map."""
+    cd = dict(cd)
+    s = cd.pop("stretch", 1.0)
+    if not cd.get("warp") and abs(s - 1.0) > 1e-9:
+        cd["warp"] = [[0.0, 0.0], [1.0, s]]
+    return cd
 
 
 @dataclass
@@ -133,7 +144,7 @@ class Project:
                 sample_rate=d.get("sample_rate", 44100))
         for td in d.get("tracks", []):
             t = Track(**{k: v for k, v in td.items() if k not in ("clips", "effects")})
-            t.clips = [Clip(**cd) for cd in td.get("clips", [])]
+            t.clips = [Clip(**_migrate_clip(cd)) for cd in td.get("clips", [])]
             t.effects = [Effect(**ed) for ed in td.get("effects", [])]
             p.tracks.append(t)
         return p

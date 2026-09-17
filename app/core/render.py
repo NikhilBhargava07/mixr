@@ -78,7 +78,7 @@ def render_project(project, resolve, sr: int = 44100, normalize: bool = True,
                 continue
             # Read the same (possibly warped) file the browser plays, with
             # offset/length measured on it — so export matches preview exactly.
-            path = audio.warped(resolve(c.source, c.file), c.stretch, c.pitch)
+            path = audio.warped(resolve(c.source, c.file), c.warp, c.pitch, c.warp_mode)
             y, _ = librosa.load(path, sr=sr, mono=False,
                                 offset=max(0.0, c.offset), duration=c.length)
             if y.ndim == 1:

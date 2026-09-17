@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "analysis"))
 sys.path.insert(0, str(ROOT / "engine"))
 
-from app.core import audio, stems, render                # noqa: E402
+from app.core import audio, stems, render, warp          # noqa: E402
 from app.core.project import Project, Clip             # noqa: E402
 
 app = FastAPI(title="mixr", version="0.2.0")
@@ -106,21 +106,21 @@ def _resolve(source: str, name: str) -> Path:
     return p
 
 
-STRETCH_RANGE = (0.5, 2.0)     # half speed .. double speed
 PITCH_RANGE = (-12.0, 12.0)    # an octave either way
 
 
-def _check_warp(stretch: float, pitch: float):
-    if not STRETCH_RANGE[0] <= stretch <= STRETCH_RANGE[1]:
-        raise HTTPException(400, f"stretch must be within {STRETCH_RANGE}")
+def _warp_args(pins, pitch, mode):
+    """Validate a (pins, pitch, mode) triple, turning bad input into a 400."""
+    try:
+        pins = warp.normalize(pins or [])
+    except warp.WarpError as e:
+        raise HTTPException(400, str(e))
+    pitch = round(float(pitch or 0.0), 3)
     if not PITCH_RANGE[0] <= pitch <= PITCH_RANGE[1]:
         raise HTTPException(400, f"pitch must be within {PITCH_RANGE}")
-
-
-def _audio_path(source: str, name: str, stretch: float = 1.0, pitch: float = 0.0) -> Path:
-    """The file a clip actually plays: the original, or its warped copy."""
-    _check_warp(stretch, pitch)
-    return audio.warped(_resolve(source, name), round(stretch, 5), round(pitch, 3))
+    if mode not in warp.MODES:
+        raise HTTPException(400, f"warp_mode must be one of {warp.MODES}")
+    return pins, pitch, mode
 
 
 # ------------------------------------------------------------------ browsing
@@ -156,9 +156,8 @@ async def import_media(file: UploadFile = File(...)):
 
 
 @app.get("/api/waveform")
-def get_waveform(source: str, name: str, buckets: int = 2000,
-                 stretch: float = 1.0, pitch: float = 0.0):
-    return audio.waveform(_audio_path(source, name, stretch, pitch), buckets=buckets)
+def get_waveform(source: str, name: str, buckets: int = 2000):
+    return audio.waveform(audio.to_wav(_resolve(source, name)), buckets=buckets)
 
 
 @app.get("/api/analyze")
@@ -167,9 +166,33 @@ def get_analysis(source: str, name: str):
 
 
 @app.get("/api/audio")
-def get_audio(source: str, name: str, stretch: float = 1.0, pitch: float = 0.0):
-    wav = _audio_path(source, name, stretch, pitch)
+def get_audio(source: str, name: str):
+    wav = audio.to_wav(_resolve(source, name))
     return FileResponse(wav, media_type="audio/wav", filename=wav.name)
+
+
+# ------------------------------------------------------------------ warp
+# POST because a warp map can hold hundreds of pins. The body carries the map
+# itself rather than a clip id, so the response depends only on the request —
+# the browser can cache by it, and nothing can change underneath mid-fetch.
+def _warped_path(body: dict) -> Path:
+    pins, pitch, mode = _warp_args(body.get("warp"), body.get("pitch"),
+                                   body.get("warp_mode", "beats"))
+    try:
+        return audio.warped(_resolve(body["source"], body["name"]), pins, pitch, mode)
+    except KeyError:
+        raise HTTPException(400, "body needs source and name")
+
+
+@app.post("/api/warp/audio")
+def warp_audio(body: dict = Body(...)):
+    wav = _warped_path(body)
+    return FileResponse(wav, media_type="audio/wav", filename=wav.name)
+
+
+@app.post("/api/warp/waveform")
+def warp_waveform(body: dict = Body(...)):
+    return audio.waveform(_warped_path(body), buckets=int(body.get("buckets", 2000)))
 
 
 # ------------------------------------------------------------------ stems
@@ -253,9 +276,14 @@ def add_clip(track: str, payload: dict = Body(...)):
                    source=payload["source"], file=payload["file"],
                    start=float(payload.get("start", 0.0)),
                    offset=float(payload.get("offset", 0.0)),
-                   length=length,
-                   stretch=float(payload.get("stretch", 1.0)),
-                   pitch=float(payload.get("pitch", 0.0)))
+                   length=length)
+    pins = payload.get("warp")
+    if pins is None and "stretch" in payload:
+        pins = warp.uniform(float(payload["stretch"]))
+    c.warp, c.pitch, c.warp_mode = _warp_args(pins, payload.get("pitch"),
+                                              payload.get("warp_mode", "beats"))
+    if not payload.get("length"):          # a whole-file clip spans the WARPED file
+        c.length = warp.src_to_dst(c.warp, info["duration"])
     return {"clip": c.id, "project": p.to_dict()}
 
 
@@ -268,18 +296,20 @@ def update_clip(track: str, clip: str, payload: dict = Body(...)):
     c = t.clip(clip)
     if not c:
         raise HTTPException(404, "no such clip")
-    if "stretch" in payload or "pitch" in payload:
-        new_s = round(float(payload.get("stretch", c.stretch)), 5)
-        new_p = round(float(payload.get("pitch", c.pitch)), 3)
-        _check_warp(new_s, new_p)
-        # offset and length are measured on the STRETCHED file. Changing the
-        # stretch rescales that file, so the same musical window moves and
-        # resizes by exactly the same ratio. start stays put: the clip grows
-        # or shrinks from its left edge, the way every DAW does it.
-        ratio = new_s / c.stretch
-        c.offset *= ratio
-        c.length *= ratio
-        c.stretch, c.pitch = new_s, new_p
+    if any(k in payload for k in ("warp", "stretch", "pitch", "warp_mode")):
+        if "warp" in payload:
+            new_pins = payload["warp"]
+        elif "stretch" in payload:           # convenience: a plain stretch
+            new_pins = warp.uniform(float(payload["stretch"]))
+        else:
+            new_pins = c.warp
+        new_pins, new_pitch, new_mode = _warp_args(
+            new_pins, payload.get("pitch", c.pitch), payload.get("warp_mode", c.warp_mode))
+        # offset and length are measured on the WARPED file. A new map moves
+        # that file's timeline, so re-find the same stretch of music on it.
+        # start stays put: the clip grows or shrinks from its left edge.
+        c.offset, c.length = warp.rescale_window(c.warp, new_pins, c.offset, c.length)
+        c.warp, c.pitch, c.warp_mode = new_pins, new_pitch, new_mode
     for k in ("start", "offset", "length", "gain", "fade_in", "fade_out", "name"):
         if k in payload:
             setattr(c, k, payload[k])
@@ -321,7 +351,7 @@ def split_clip(track: str, clip: str, at: float):
         offset=c.offset + left_len,
         length=c.length - left_len,
         gain=c.gain, fade_in=0.005, fade_out=c.fade_out,
-        stretch=c.stretch, pitch=c.pitch,
+        warp=list(c.warp), warp_mode=c.warp_mode, pitch=c.pitch,  # both halves share one map
     )
     c.length = left_len          # shrink the original into the left half
     c.fade_out = 0.005           # tiny fades at the seam so it doesn't click

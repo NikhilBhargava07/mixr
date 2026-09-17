@@ -47,27 +47,44 @@ _warp_locks: dict[str, threading.Lock] = {}
 _warp_guard = threading.Lock()
 
 
-def warped(path: Path, stretch: float = 1.0, pitch: float = 0.0) -> Path:
-    """The whole file, time-stretched and/or pitch-shifted, as a cached WAV.
-
-    `stretch` is a DURATION ratio: 1.075 makes the audio 7.5% longer, i.e.
-    slower. That's Rubber Band's -t flag, verbatim.
+def warped(path: Path, pins=(), pitch: float = 0.0, mode: str = "beats") -> Path:
+    """The whole file, warped by a pin map and/or pitch-shifted, as a cached WAV.
 
     Preview and export both read this exact file, so what you hear in the
-    browser is sample-for-sample what gets rendered. R2 (the default engine)
-    takes ~5s for a 4-minute song; R3 (-3) sounds finer but takes ~25s, too
-    slow to wait on every tempo change.
+    browser is sample-for-sample what gets rendered.
+
+    Engine choice was measured on a click track (tests/warp_accuracy.py):
+      beats  R2, --crisp 6   hits land within ~3 ms of where the pins put them
+      tones  R2, default     smoother on sustained sound, but hits land ~16 ms
+                             EARLY — a flam-sized error on drums
+    R3 (--fine) sounds finer but ignores --timemap entirely, so it's unusable.
     """
-    if abs(stretch - 1.0) < 1e-6 and abs(pitch) < 1e-6:
+    from . import warp as W
+    pins = list(pins)
+    if not pins and abs(pitch) < 1e-6:
         return to_wav(path)
-    out = CACHE / f"warp_{_key(path)}_{stretch:.5f}_{pitch:+.3f}.wav"
+    if mode not in W.MODES:
+        raise ValueError(f"unknown warp mode {mode!r}")
+    src = to_wav(path)
+    out = CACHE / f"warp_{_key(path)}_{W.signature(pins, pitch, mode)}.wav"
     with _warp_guard:
         lock = _warp_locks.setdefault(out.name, threading.Lock())
     with lock:
         if not out.exists():
-            tmp = out.with_name(out.stem + ".part.wav")   # never serve half a file
-            subprocess.run(["rubberband", "-q", "-t", f"{stretch:.5f}", "-p", f"{pitch:.3f}",
-                            str(to_wav(path)), str(tmp)], check=True, capture_output=True)
+            import soundfile as sf
+            info = sf.info(str(src))
+            cmd = ["rubberband", "-q", "-p", f"{pitch:.3f}"]
+            if mode == "beats":
+                cmd += ["-c", "6"]
+            else:
+                cmd += ["-F"]                      # keep vocal formants when repitching
+            tmp = out.with_name(out.stem + ".part.wav")
+            if pins:
+                frames, end = W.rubberband_map(pins, info.duration, info.samplerate)
+                mapfile = out.with_name(out.stem + ".map.txt")
+                mapfile.write_text("".join(f"{a} {b}\n" for a, b in frames))
+                cmd += ["-D", f"{end:.6f}", "-M", str(mapfile)]
+            subprocess.run(cmd + [str(src), str(tmp)], check=True, capture_output=True)
             tmp.replace(out)
     return out
 

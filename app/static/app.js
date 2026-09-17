@@ -27,29 +27,46 @@ const api = async (path, opts) => {
 const post = (path, body) =>
   api(path, { method: "POST", headers: { "Content-Type": "application/json" },
               body: body === undefined ? undefined : JSON.stringify(body) });
-// A clip's audio is identified by its file AND its warp: the same song at two
-// tempos is two different files on the server, with two different waveforms.
-const warpOf = (c) => ({ stretch: c.stretch ?? 1, pitch: c.pitch ?? 0 });
-const key = (c) => { const w = warpOf(c); return `${c.source}/${c.file}@${w.stretch}/${w.pitch}`; };
-const audioQuery = (c) => {
-  const w = warpOf(c);
-  return `source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}` +
-         `&stretch=${w.stretch}&pitch=${w.pitch}`;
-};
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 
-// Both take a clip (or anything with source/file and optional stretch/pitch).
+// A clip's audio is identified by its file AND its warp: the same song under
+// two warp maps is two different files on the server, with two waveforms.
+// warpOf() pulls out just those fields, so it can be copied onto new clips.
+const warpOf = (c) => ({ warp: c.warp || [], warp_mode: c.warp_mode || "beats", pitch: c.pitch || 0 });
+const isWarped = (c) => (c.warp && c.warp.length > 0) || Math.abs(c.pitch || 0) > 1e-6;
+const key = (c) => `${c.source}/${c.file}` + (isWarped(c) ? `@${JSON.stringify(warpOf(c))}` : "");
+const plainQuery = (c) => `source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}`;
+const warpBody = (c, extra) => JSON.stringify({ source: c.source, name: c.file, ...warpOf(c), ...extra });
+
+// Overall speed of a clip, for labels. The server's maths lives in warp.py;
+// this is only the slope from the first pin to the last.
+function speedOf(c) {
+  const w = c.warp || [];
+  if (w.length < 2) return 1;
+  const a = w[0], b = w[w.length - 1];
+  return (b[0] - a[0]) / (b[1] - a[1]);          // source seconds per warped second
+}
+
+// Both take a clip (or anything with source/file and optional warp fields).
 // The first request for a new warp makes the server run Rubber Band, ~5s.
 async function getWave(c) {
   const k = key(c);
-  if (!waveCache.has(k)) waveCache.set(k, await api(`/api/waveform?${audioQuery(c)}&buckets=1600`));
+  if (!waveCache.has(k)) {
+    waveCache.set(k, isWarped(c)
+      ? await api("/api/warp/waveform", { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: warpBody(c, { buckets: 1600 }) })
+      : await api(`/api/waveform?${plainQuery(c)}&buckets=1600`));
+  }
   return waveCache.get(k);
 }
 async function getBuffer(c) {
   const k = key(c);
   if (!bufCache.has(k)) {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    const r = await fetch(`/api/audio?${audioQuery(c)}`);
+    const r = isWarped(c)
+      ? await fetch("/api/warp/audio", { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: warpBody(c) })
+      : await fetch(`/api/audio?${plainQuery(c)}`);
     if (!r.ok) throw new Error(`audio ${r.status}`);
     bufCache.set(k, await actx.decodeAudioData(await r.arrayBuffer()));
   }
@@ -222,9 +239,10 @@ function render() {
       drawFades(g, c, cx, cw, y + 4, TRACK_H - 12, isSel);
 
       g.fillStyle = "#cfd6e4"; g.font = "10px system-ui";
-      const s = c.stretch ?? 1;
-      g.fillText(c.name.slice(0, 28) + (Math.abs(s - 1) > 1e-4 ? `  ·  ${(100 / s).toFixed(1)}% speed` : ""),
-                 cx + 6, y + 16);
+      const w = c.warp || [];
+      const tag = w.length > 2 ? `  ·  warped (${w.length} pins)`
+                : w.length === 2 ? `  ·  ${(100 * speedOf(c)).toFixed(1)}% speed` : "";
+      g.fillText(c.name.slice(0, 28) + tag, cx + 6, y + 16);
     }
   });
 
@@ -931,7 +949,7 @@ async function applyWarp(tr, c, warp) {
     const fresh = project.tracks.find(t => t.id === tr.id).clips.find(x => x.id === c.id);
     await getWave(fresh);
     render();
-    setStatus(`${fresh.name}: ${(100 / fresh.stretch).toFixed(1)}% speed`);
+    setStatus(`${fresh.name}: ${(100 * speedOf(fresh)).toFixed(1)}% speed, ${fresh.warp_mode} mode`);
   } catch (e) {
     setStatus(`warp failed: ${e.message}`);
   }
@@ -959,7 +977,8 @@ async function applyWarp(tr, c, warp) {
 
    Also note: stretch is relative to the ORIGINAL file, not to the clip's
    current stretch — so matching twice must give the same answer, not
-   compound.
+   compound. (Sending { stretch } replaces any warp pins with one even
+   stretch — that's fine for this feature.)
 
    Handle these (each is one `if` + setStatus + return):
      1. the analysis has no tempo
@@ -990,12 +1009,15 @@ function clipMenu(tr, c, px, py) {
         const r = await post(`/api/clip/add?track=${tr.id}`, {
           source: c.source, file: c.file, name: c.name,
           start: c.start + c.length, offset: c.offset, length: c.length,
-          stretch: c.stretch, pitch: c.pitch });
+          ...warpOf(c) });
         project = r.project; render(); } },
     { sep: true },
     { label: "Match project tempo", run: () => matchProjectTempo(tr, c) },
-    { label: "Reset speed", disabled: Math.abs((c.stretch ?? 1) - 1) < 1e-4,
-      run: () => applyWarp(tr, c, { stretch: 1 }) },
+    { label: "Reset speed", disabled: !(c.warp && c.warp.length),
+      run: () => applyWarp(tr, c, { warp: [] }) },
+    { label: `Warp mode: ${c.warp_mode === "tones" ? "Tones" : "Beats"}  ⇄`,
+      disabled: !isWarped(c),
+      run: () => applyWarp(tr, c, { warp_mode: c.warp_mode === "tones" ? "beats" : "tones" }) },
     { sep: true },
     { label: "Delete clip", danger: true, key: "⌫", run: async () => {
         project = await post(`/api/clip/remove?track=${tr.id}&clip=${c.id}`);
@@ -1063,7 +1085,7 @@ async function separateStems(tr) {
       const r = await post(`/api/clip/add?track=${tid}`, {
         source: "stems", file: rel, name: part,
         start: c.start, offset: c.offset, length: c.length,
-        stretch: c.stretch, pitch: c.pitch });
+        ...warpOf(c) });
       project = r.project;
       await getWave({ source: "stems", file: rel, ...warpOf(c) });
       render();
