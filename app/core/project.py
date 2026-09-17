@@ -105,6 +105,7 @@ class Project:
     # The grid. If downbeats is populated we use it verbatim (per-bar, so it
     # cannot drift); otherwise the UI falls back to a fixed bpm grid.
     downbeats: list[float] = field(default_factory=list)
+    key: str = ""             # e.g. "F# minor" — the key clips get matched to
     sample_rate: int = 44100
     tracks: list[Track] = field(default_factory=list)
 
@@ -141,6 +142,7 @@ class Project:
     def from_dict(cls, d: dict) -> "Project":
         p = cls(id=d.get("id", _id()), name=d.get("name", "Untitled"),
                 bpm=d.get("bpm", 100.0), downbeats=d.get("downbeats", []),
+                key=d.get("key", ""),
                 sample_rate=d.get("sample_rate", 44100))
         for td in d.get("tracks", []):
             t = Track(**{k: v for k, v in td.items() if k not in ("clips", "effects")})

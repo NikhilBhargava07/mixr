@@ -17,6 +17,7 @@ let selected = null;            // {track, clip}
 
 const TRACK_H = 84, HEAD_W = 190, RULER_H = 30;
 const PH_W = 8, PH_HEAD_H = 13;   // playhead handle: half-width, height
+const PIN_W = 4, PIN_H = 11;      // warp-pin handle: half-width, height
 
 // ---------------------------------------------------------------- helpers
 const api = async (path, opts) => {
@@ -27,6 +28,10 @@ const api = async (path, opts) => {
 const post = (path, body) =>
   api(path, { method: "POST", headers: { "Content-Type": "application/json" },
               body: body === undefined ? undefined : JSON.stringify(body) });
+// Clip.end is a Python @property, so it never survives the trip to JSON —
+// reading c.end here silently gave undefined, and every comparison against it
+// was false. That made clips unclickable: no select, drag, trim or fade.
+const clipEnd = (c) => c.start + c.length;
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 
 // A clip's audio is identified by its file AND its warp: the same song under
@@ -37,6 +42,25 @@ const isWarped = (c) => (c.warp && c.warp.length > 0) || Math.abs(c.pitch || 0) 
 const key = (c) => `${c.source}/${c.file}` + (isWarped(c) ? `@${JSON.stringify(warpOf(c))}` : "");
 const plainQuery = (c) => `source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}`;
 const warpBody = (c, extra) => JSON.stringify({ source: c.source, name: c.file, ...warpOf(c), ...extra });
+
+// Where a warp pin sits on the timeline. A pin is [src, dst] in warped-file
+// seconds; the clip shows the window [offset, offset+length) of that file.
+const pinX = (c, pin) => c.start + (pin[1] - c.offset);
+const pinsInWindow = (c) =>
+  (c.warp || []).map((pin, i) => ({ i, pin, t: pinX(c, pin) }))
+                .filter(o => o.t >= c.start - 1e-9 && o.t <= clipEnd(c) + 1e-9);
+
+// Inverse of the warp map — the mirror of dst_to_src() in app/core/warp.py.
+// Swapping each pin's two numbers inverts a monotonic piecewise-linear map.
+function warpSrcToDst(pins, t) {
+  if (!pins.length) return t;
+  if (pins.length === 1) return t + (pins[0][1] - pins[0][0]);
+  let i = 0;
+  while (i < pins.length - 2 && t > pins[i + 1][0]) i++;
+  const [as, ad] = pins[i], [bs, bd] = pins[i + 1];
+  return ad + (t - as) * ((bd - ad) / (bs - as));
+}
+const warpDstToSrc = (pins, t) => warpSrcToDst(pins.map(([a, b]) => [b, a]), t);
 
 // Overall speed of a clip, for labels. The server's maths lives in warp.py;
 // this is only the slope from the first pin to the last.
@@ -133,16 +157,23 @@ async function loadBrowser() {
   imp.innerHTML = `<input type="file" accept="audio/*" multiple hidden>+ Import audio`;
   imp.querySelector("input").onchange = async (e) => {
     const files = [...e.target.files];
+    let done = 0; const failed = [];
     for (const f of files) {
       const fd = new FormData();
       fd.append("file", f);
       setStatus(`importing ${f.name}…`);
-      try { await fetch("/api/media/import", { method: "POST", body: fd }); }
-      catch (err) { setStatus(`import failed: ${err.message}`); }
+      // fetch only rejects on a NETWORK failure — a 500 from the server still
+      // resolves, so without checking res.ok a failed import reported success.
+      try {
+        const res = await fetch("/api/media/import", { method: "POST", body: fd });
+        if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+        done++;
+      } catch (err) { failed.push(`${f.name}: ${err.message}`); }
     }
     sectionOpen.media = true;
     await loadBrowser();
-    setStatus(`imported ${files.length} file${files.length > 1 ? "s" : ""}`);
+    setStatus(failed.length ? `imported ${done}/${files.length} — ${failed[0]}`
+                            : `imported ${done} file${done > 1 ? "s" : ""}`);
   };
   side.appendChild(imp);
 }
@@ -160,7 +191,8 @@ async function addAsTrack(source, file) {
     const a = await api(`/api/analyze?${q}`);
     if (a.downbeats && a.downbeats.length) {
       project = await post("/api/project/tempo", { bpm: a.bpm_from_downbeats || a.bpm,
-                                                   downbeats: a.downbeats });
+                                                   downbeats: a.downbeats,
+                                                   key: (a.key && a.key.key) || "" });
     }
   }
   render(); setStatus("ready");
@@ -240,9 +272,11 @@ function render() {
 
       g.fillStyle = "#cfd6e4"; g.font = "10px system-ui";
       const w = c.warp || [];
+      const semis = c.pitch ? `  ·  ${c.pitch > 0 ? "+" : ""}${c.pitch.toFixed(0)} st` : "";
       const tag = w.length > 2 ? `  ·  warped (${w.length} pins)`
                 : w.length === 2 ? `  ·  ${(100 * speedOf(c)).toFixed(1)}% speed` : "";
-      g.fillText(c.name.slice(0, 28) + tag, cx + 6, y + 16);
+      g.fillText(c.name.slice(0, 28) + tag + semis, cx + 6, y + 16);
+      drawWarpPins(g, c, y + 4, TRACK_H - 12);
     }
   });
 
@@ -274,6 +308,28 @@ function drawPlayhead(g, px, H, W) {
   g.lineTo(px, PH_HEAD_H);
   g.closePath(); g.fill();
   g.restore();
+}
+
+// Warp pins live in a strip along the bottom of the clip: a small handle with
+// a hairline up through the waveform, so you can see what a pin is holding.
+function drawWarpPins(g, c, y, h) {
+  const list = pinsInWindow(c);
+  if (!list.length) return;
+  const base = y + h;
+  for (const { t } of list) {
+    const px = HEAD_W + (t - scrollX) * pxPerSec;
+    if (px < HEAD_W - 6 || px > g.canvas.clientWidth + 6) continue;
+    g.strokeStyle = "rgba(255,214,102,.35)"; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(px, y); g.lineTo(px, base - PIN_H); g.stroke();
+    g.fillStyle = "#ffd666";
+    g.beginPath();                               // a house-shaped handle
+    g.moveTo(px, base - PIN_H);
+    g.lineTo(px + PIN_W, base - PIN_H + 5);
+    g.lineTo(px + PIN_W, base);
+    g.lineTo(px - PIN_W, base);
+    g.lineTo(px - PIN_W, base - PIN_H + 5);
+    g.closePath(); g.fill();
+  }
 }
 
 function drawFades(g, c, cx, cw, y, h, isSel) {
@@ -442,20 +498,27 @@ function hit(mx, my) {
   }
   const t = scrollX + (mx - HEAD_W) / pxPerSec;
   for (const c of tr.clips) {
-    if (t >= c.start && t <= c.end) {
+    if (t >= c.start && t <= clipEnd(c)) {
       const edge = 6 / pxPerSec;
       // top strip of the clip = fade handles (checked BEFORE trim so the
       // corners aren't ambiguous)
+      // bottom strip = warp pins, checked first: it's their only grab area
+      if (my - y > TRACK_H - 26) {
+        const grab = 7 / pxPerSec;
+        const near = pinsInWindow(c).find(o => Math.abs(t - o.t) < grab);
+        if (near) return { kind: "warp-pin", track: tr, clip: c, t, pin: near.i };
+        return { kind: "pin-strip", track: tr, clip: c, t };
+      }
       const topStrip = my - y < 18;
       if (topStrip) {
         const grab = 9 / pxPerSec;
         if (Math.abs(t - (c.start + c.fade_in)) < grab)
           return { kind: "fade-in", track: tr, clip: c, t };
-        if (Math.abs(t - (c.end - c.fade_out)) < grab)
+        if (Math.abs(t - (clipEnd(c) - c.fade_out)) < grab)
           return { kind: "fade-out", track: tr, clip: c, t };
       }
       if (t < c.start + edge) return { kind: "trim-left", track: tr, clip: c, t };
-      if (t > c.end - edge) return { kind: "trim-right", track: tr, clip: c, t };
+      if (t > clipEnd(c) - edge) return { kind: "trim-right", track: tr, clip: c, t };
       return { kind: "clip", track: tr, clip: c, t };
     }
   }
@@ -487,6 +550,22 @@ $("timeline").addEventListener("mousedown", async (e) => {
   if (h.kind === "volume") {
     const v = Math.max(0, Math.min(1.5, (mx - 10) / 160));
     project = await post(`/api/track/update?track=${h.track.id}`, { volume: v });
+    render(); return;
+  }
+  if (h.kind === "warp-pin") {
+    selected = { track: h.track.id, clip: h.clip.id };
+    if (e.altKey) {                               // alt-click removes a pin
+      const pins = h.clip.warp.filter((_, i) => i !== h.pin);
+      await applyWarp(h.track, h.clip, { warp: pins });
+      return;
+    }
+    // Dragging re-renders audio (seconds), so the map is only sent on mouseup.
+    drag = { mode: "warp-pin", track: h.track, clip: h.clip, pin: h.pin,
+             before: JSON.parse(JSON.stringify(h.clip.warp)) };
+    render(); return;
+  }
+  if (h.kind === "pin-strip") {
+    selected = { track: h.track.id, clip: h.clip.id };
     render(); return;
   }
   if (h.kind === "clip") {
@@ -529,6 +608,17 @@ window.addEventListener("mousemove", (e) => {
   // TOUCH POINT 2 of 3 — while dragging the playhead, just move the marker.
   if (drag.mode === "playhead") { playheadDragMove(t); return; }
 
+  if (drag.mode === "warp-pin") {
+    // Move this pin only. Its neighbours hold, so the audio either side of it
+    // stretches — which is exactly what a warp marker does.
+    const c = drag.clip;
+    const dst = snap(t) - c.start + c.offset;
+    const lo = drag.pin > 0 ? c.warp[drag.pin - 1][1] + 0.05 : -1e9;
+    const hi = drag.pin < c.warp.length - 1 ? c.warp[drag.pin + 1][1] - 0.05 : 1e9;
+    c.warp[drag.pin][1] = Math.max(lo, Math.min(hi, dst));
+    render();
+    return;
+  }
   if (drag.mode === "move") {
     let ns = Math.max(0, t - drag.grab);
     ns = snap(ns);
@@ -550,6 +640,15 @@ window.addEventListener("mouseup", async () => {
   // here and return BEFORE the clip-update code below (which would crash).
   if (drag.mode === "playhead") { await playheadDragEnd(); return; }
 
+  if (drag.mode === "warp-pin") {
+    const { track, clip, before } = drag;
+    const pins = clip.warp;
+    drag = null;
+    clip.warp = before;                    // let the server be the one to change it
+    await applyWarp(track, clip, { warp: pins });
+    return;
+  }
+
   const { track, clip } = drag;
   const payload = { start: clip.start, offset: clip.offset, length: clip.length,
                     fade_in: clip.fade_in, fade_out: clip.fade_out };
@@ -558,27 +657,12 @@ window.addEventListener("mouseup", async () => {
   render();
 });
 
-/* ============================================================
-   YOUR TURN — implement trimDrag()
+/* Dragging a clip edge resizes the WINDOW, never the audio.
 
-   Dragging a clip's LEFT or RIGHT edge should resize it without moving the
-   audio underneath. Think of the clip as a window onto the file.
-
-   Available:
-     d.mode        "trim-left" | "trim-right"
-     d.clip        the clip object — mutate .start / .offset / .length
-     d.startVal    {start, offset, length} captured when the drag began
-     d.grabT       timeline position where the drag began
-     t             current timeline position under the mouse
-     snap(x)       snaps a timeline position to the nearest downbeat
-
-   RIGHT edge is the easy one: only `length` changes.
-   LEFT edge is the interesting one: `start` moves AND `offset` must move by
-   the same amount, or the audio will slide. `length` shrinks by that amount.
-
-   Guard against: negative length, negative offset, and dragging an edge past
-   the opposite edge.
-   ============================================================ */
+   Right edge: only `length` changes.
+   Left edge: `start` moves, `offset` moves by the same amount so the audio
+   stays put, and `length` shrinks by that amount. Guarded against negative
+   length, negative offset, and dragging an edge past its opposite. */
 function trimDrag(d, t) {
   const MIN = 0.05;  // minimum length of a clip in seconds
   const ns = Math.max(0, snap(t));    // clamp FIRST
@@ -602,36 +686,9 @@ function trimDrag(d, t) {
   }
 }
 
-/* ============================================================
-   YOUR TURN — custom_start: dragging the playhead
-
-   Three functions, called from the three TOUCH POINTs above.
-
-   State you can use:
-     drag            set it to { mode: "playhead", wasPlaying: <bool> } to begin,
-                     set it to null to end
-     playOffset      the playhead position in seconds — this is what you move
-     playing         true if audio is currently running
-     pause()         stops audio and captures the current position
-     play()          starts audio from playOffset (async — use await)
-     render()        redraw
-     snap(x)         snap a timeline position to the nearest downbeat
-
-   playheadDragStart(mx)
-     - convert the mouse x to seconds:  scrollX + (mx - HEAD_W) / pxPerSec
-     - remember whether we were playing, then pause() if so
-     - set playOffset (clamp to >= 0), set drag, render()
-
-   playheadDragMove(t)
-     - t is already in seconds. Move playOffset (clamp to >= 0) and render().
-
-   playheadDragEnd()
-     - if we were playing when the drag started, play() again from the new spot
-     - clear drag, render()
-
-   Hint: this is the same three-phase shape as the clip drag you already wrote —
-   mousedown captures state, mousemove updates it, mouseup commits it.
-   ============================================================ */
+/* Dragging the playhead, in the usual three phases: mousedown captures state,
+   mousemove updates it, mouseup commits it. Audio is stopped for the duration
+   of the drag because re-seeking every frame would stutter. */
 function playheadDragStart(mx) {
   const seconds = scrollX + (mx - HEAD_W) / pxPerSec;
   // Snapshot BEFORE pause() — it sets playing = false, so reading `playing`
@@ -645,14 +702,12 @@ function playheadDragStart(mx) {
 }
 
 function playheadDragMove(t) {
-  // TODO
   playOffset = Math.max(0, t);
   render();
 }
 
 async function playheadDragEnd() {
-  // TODO
-  if (drag.wasPlaying) {
+  if (drag.wasPlaying) {          // resume from where it was dropped
     await play();
   }
   drag = null;
@@ -955,41 +1010,88 @@ async function applyWarp(tr, c, warp) {
   }
 }
 
-/* ============================================================================
-   YOUR TURN — matchProjectTempo(tr, c)
-
-   Goal: stretch clip `c` so its tempo equals the project's tempo.
-
-   What you have:
-     project.bpm        the project tempo (adopted from the first track added)
-     await api(`/api/analyze?source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}`)
-                        analysis of the ORIGINAL file. Returns an object with
-                        .bpm and .bpm_from_downbeats (either can be null).
-                        addAsTrack prefers bpm_from_downbeats, so do the same.
-     applyWarp(tr, c, { stretch })
-                        sends it to the server and waits for the audio.
-
-   The one thing to get right: `stretch` is a DURATION ratio.
-     stretch > 1  → clip gets LONGER → plays SLOWER
-     stretch < 1  → clip gets SHORTER → plays FASTER
-   Sanity check before you trust your formula: PTTR is ~100 BPM. Matching it
-   to a 93 BPM jhummar project has to make it slower. Does yours give > 1?
-
-   Also note: stretch is relative to the ORIGINAL file, not to the clip's
-   current stretch — so matching twice must give the same answer, not
-   compound. (Sending { stretch } replaces any warp pins with one even
-   stretch — that's fine for this feature.)
-
-   Handle these (each is one `if` + setStatus + return):
-     1. the analysis has no tempo
-     2. the clip is already at project tempo (don't warp for nothing)
-     3. the ratio is outside 0.5–2.0 — the server will refuse it. This usually
-        means the detector heard half- or double-time (e.g. 84 vs 168), so
-        a nicer version halves/doubles clipBpm until it's in range.
-   ========================================================================== */
+// Stretch a clip so its tempo matches the project's.
+//
+// `stretch` is a DURATION ratio, so the direction is easy to get backwards:
+// a 100 BPM song matched to a 93 BPM project has to become LONGER (slower),
+// and 100/93 = 1.075 > 1. Hence clipBpm / projectBpm, not the other way up.
+//
+// The ratio is always computed from the ORIGINAL file's tempo, so running this
+// twice gives the same answer instead of compounding.
 async function matchProjectTempo(tr, c) {
-  setStatus("matchProjectTempo isn't written yet — see the YOUR TURN block in app.js");
+  const target = project.bpm;
+  if (!target) { setStatus("the project has no tempo yet"); return; }
+
+  setStatus(`analysing ${c.name}…`);
+  let a;
+  try {
+    a = await api(`/api/analyze?source=${encodeURIComponent(c.source)}` +
+                  `&name=${encodeURIComponent(c.file)}`);
+  } catch (e) { setStatus(`couldn't analyse ${c.name}: ${e.message}`); return; }
+
+  let clipBpm = a.bpm_from_downbeats || a.bpm;     // addAsTrack prefers the same one
+  if (!clipBpm) { setStatus(`no tempo could be detected in ${c.name}`); return; }
+
+  // Detectors routinely hear half or double time (kuthu at 84 comes back as
+  // 168). Fold the reading into the octave nearest the project before giving
+  // up on it — an out-of-range ratio is usually this, not a real mismatch.
+  while (clipBpm / target > 1.5) clipBpm /= 2;
+  while (clipBpm / target < 0.67) clipBpm *= 2;
+
+  const stretch = clipBpm / target;
+  if (Math.abs(stretch - 1) < 0.001) {
+    setStatus(`${c.name} is already at ${target.toFixed(2)} BPM`);
+    return;
+  }
+  if (stretch < 0.5 || stretch > 2) {
+    setStatus(`${clipBpm.toFixed(1)} → ${target.toFixed(1)} BPM is too far to stretch`);
+    return;
+  }
+  await applyWarp(tr, c, { stretch });
+  setStatus(`${c.name}: ${clipBpm.toFixed(1)} → ${target.toFixed(2)} BPM ` +
+            `(${(100 * speedOf(project.tracks.find(x => x.id === tr.id)
+                 .clips.find(x => x.id === c.id))).toFixed(1)}% speed)`);
 }
+
+// Warp every bar of the clip onto the project grid, and transposition.
+async function warpToGrid(tr, c) {
+  setStatus("finding downbeats…");
+  try {
+    const r = await post(`/api/clip/warp-to-grid?track=${tr.id}&clip=${c.id}`);
+    project = r.project;
+    render();
+    const fresh = project.tracks.find(x => x.id === tr.id).clips.find(x => x.id === c.id);
+    setStatus(`warping to grid (${r.pins} bars @ ${r.bpm} BPM)…`);
+    await getWave(fresh);
+    render();
+    setStatus(`${c.name}: ${r.pins} bars pinned to the grid`);
+  } catch (e) { setStatus(`warp to grid failed: ${e.message}`); }
+}
+
+async function matchProjectKey(tr, c) {
+  setStatus("checking key…");
+  try {
+    const r = await post(`/api/clip/match-key?track=${tr.id}&clip=${c.id}`);
+    project = r.project;
+    render();
+    const fresh = project.tracks.find(x => x.id === tr.id).clips.find(x => x.id === c.id);
+    if (r.semitones !== 0) await getWave(fresh);
+    render();
+    setStatus(`${r.from} → ${r.to}: ${r.semitones > 0 ? "+" : ""}${r.semitones} semitones` +
+              (r.confidence < 0.7 ? "  (low confidence — check by ear)" : ""));
+  } catch (e) { setStatus(`match key failed: ${e.message}`); }
+}
+
+// The Transpose slider fires on every pixel of movement, and each distinct
+// value is a fresh Rubber Band render. Hold the last value and apply it once
+// the mouse comes up.
+let pendingPitch = null;
+window.addEventListener("mouseup", async () => {
+  if (!pendingPitch) return;
+  const { tr, c, v } = pendingPitch;
+  pendingPitch = null;
+  if ((c.pitch || 0) !== v) await applyWarp(tr, c, { pitch: v });
+});
 
 function clipMenu(tr, c, px, py) {
   const at = currentTime();
@@ -1013,6 +1115,13 @@ function clipMenu(tr, c, px, py) {
         project = r.project; render(); } },
     { sep: true },
     { label: "Match project tempo", run: () => matchProjectTempo(tr, c) },
+    { label: "Warp every bar to grid", run: () => warpToGrid(tr, c) },
+    { label: "Match project key", disabled: !project.key,
+      run: () => matchProjectKey(tr, c) },
+    { slider: true, label: "Transpose", min: -12, max: 12, step: 1, value: c.pitch || 0,
+      fmt: v => (v > 0 ? "+" : "") + v + " st",
+      // applied on release, not per pixel: each change re-renders the audio
+      oninput: (v) => { pendingPitch = { tr, c, v }; } },
     { label: "Reset speed", disabled: !(c.warp && c.warp.length),
       run: () => applyWarp(tr, c, { warp: [] }) },
     { label: `Warp mode: ${c.warp_mode === "tones" ? "Tones" : "Beats"}  ⇄`,
@@ -1026,6 +1135,20 @@ function clipMenu(tr, c, px, py) {
 }
 
 // right-click anywhere on the timeline
+// Double-click in a clip's pin strip drops a pin at that moment: it pins the
+// music where it already is, so dragging it is what actually warps anything.
+$("timeline").addEventListener("dblclick", async (e) => {
+  const r = e.target.getBoundingClientRect();
+  const h = hit(e.clientX - r.left, e.clientY - r.top);
+  if (!h || (h.kind !== "pin-strip" && h.kind !== "warp-pin")) return;
+  if (h.kind === "warp-pin") return;
+  const c = h.clip;
+  const dst = h.t - c.start + c.offset;
+  const src = warpDstToSrc(c.warp || [], dst);
+  const pins = [...(c.warp || []), [src, dst]].sort((a, b) => a[0] - b[0]);
+  await applyWarp(h.track, c, { warp: pins });
+});
+
 $("timeline").addEventListener("contextmenu", (e) => {
   e.preventDefault();
   const r = e.target.getBoundingClientRect();

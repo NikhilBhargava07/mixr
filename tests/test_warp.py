@@ -82,6 +82,44 @@ def test_signature_is_stable_and_sensitive():
     assert a != warp.signature([[0, 0], [1, 1.08]], 0, "beats")
 
 
+
+
+def test_best_bar_picks_the_multiple_that_fits_the_song():
+    dbs = [0, 2.0, 4.0, 6.0, 8.0]                  # 2s bars
+    assert close(warp.best_bar(dbs, 2.0), 2.0)
+    assert close(warp.best_bar(dbs, 4.0), 2.0)     # grid heard double-time
+    assert close(warp.best_bar(dbs, 1.0), 2.0)     # grid heard half-time
+
+
+def test_from_downbeats_locks_a_drifting_song_to_the_grid():
+    dbs = [0.0, 2.1, 4.1, 6.4, 8.4]                # drifts around a 2s bar
+    pins = warp.normalize(warp.from_downbeats(dbs, 2.0))
+    for i, src in enumerate(dbs):
+        assert close(warp.src_to_dst(pins, src), i * 2.0, 1e-6)
+
+
+def test_from_downbeats_skips_an_impossible_downbeat():
+    dbs = [0.0, 2.0, 2.05, 6.0, 8.0]               # 2.05 is a false positive
+    pins = warp.from_downbeats(dbs, 2.0)
+    assert [p[0] for p in pins] == [0.0, 2.0, 6.0, 8.0]
+    warp.normalize(pins)                            # must still be a legal map
+
+
+def test_from_downbeats_anchors_where_told():
+    pins = warp.from_downbeats([10.0, 12.0, 14.0], 2.0, anchor_dst=30.0, anchor=0)
+    assert pins[0] == [10.0, 30.0] and pins[-1] == [14.0, 34.0]
+
+
+def test_key_parsing_and_transposition():
+    assert warp.parse_key("F# minor") == (6, "minor")
+    assert warp.parse_key("Bb major") == (10, "major")
+    assert warp.parse_key("nonsense") is None
+    assert warp.semitones_between("C major", "D major") == 2
+    assert warp.semitones_between("C major", "A major") == -3      # not +9
+    assert warp.semitones_between("C major", "F# major") == 6
+    assert warp.semitones_between("C major", "") is None
+
+
 if __name__ == "__main__":
     fns = [v for k, v in dict(globals()).items() if k.startswith("test_")]
     for f in fns:

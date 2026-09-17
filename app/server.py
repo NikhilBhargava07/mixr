@@ -226,13 +226,93 @@ def new_project(name: str = "Untitled"):
 
 
 @app.post("/api/project/tempo")
-def set_tempo(bpm: float = Body(...), downbeats: list[float] = Body(default=[])):
+def set_tempo(bpm: float = Body(...), downbeats: list[float] = Body(default=[]),
+              key: str = Body(default="")):
     snapshot("tempo", coalesce=True)
     p = STATE["current"]
     p.bpm = bpm
     if downbeats:
         p.downbeats = downbeats
+    if key:
+        p.key = key
     return p.to_dict()
+
+
+# ------------------------------------------------------------------ auto-warp
+def _grid(p, t: float, step: float):
+    """The project bar line nearest timeline position `t`."""
+    if p.downbeats:
+        near = min(p.downbeats, key=lambda d: abs(d - t))
+        if abs(near - t) <= step:                    # inside the analysed stretch
+            return near
+        # past the end of the analysed grid: keep counting bars from the last one
+        last = p.downbeats[-1]
+        return last + round((t - last) / step) * step
+    return round(t / step) * step
+
+
+@app.post("/api/clip/warp-to-grid")
+def warp_to_grid(track: str, clip: str):
+    """Pin every downbeat of the clip's file to a bar line of the project.
+
+    Three steps, in this order:
+      1. build the map from the file's detected downbeats
+      2. keep the clip on the same MUSIC (rescale its window onto the new map)
+      3. slide the clip so its first downbeat sits exactly on a bar line
+    """
+    snapshot("clip.warp-to-grid")
+    p = STATE["current"]
+    t = p.track(track)
+    c = t.clip(clip) if t else None
+    if not c:
+        raise HTTPException(404, "no such clip")
+
+    info = audio.analyze(_resolve(c.source, c.file))
+    dbs = info.get("downbeats") or []
+    if len(dbs) < 2:
+        raise HTTPException(400, "no downbeats were detected in this file")
+
+    bar = warp.best_bar(dbs, 240.0 / (p.bpm or 100.0))
+    # the first downbeat inside the clip's window is the anchor
+    win0 = warp.dst_to_src(c.warp, c.offset)
+    anchor = next((i for i, d in enumerate(dbs) if d >= win0 - 1e-6), 0)
+    pins = warp.from_downbeats(dbs, bar, anchor_dst=warp.src_to_dst(c.warp, dbs[anchor]),
+                               anchor=anchor)
+    try:
+        pins = warp.normalize(pins)
+    except warp.WarpError as e:
+        raise HTTPException(400, f"couldn't build a usable map: {e}")
+
+    c.offset, c.length = warp.rescale_window(c.warp, pins, c.offset, c.length)
+    c.warp = pins
+    # now snap the anchor onto the grid by moving the clip, not the audio
+    anchor_tl = c.start + (warp.src_to_dst(pins, dbs[anchor]) - c.offset)
+    c.start = max(0.0, c.start + (_grid(p, anchor_tl, bar) - anchor_tl))
+    t.clips.sort(key=lambda x: x.start)
+    return {"pins": len(pins), "bar": round(bar, 4),
+            "bpm": round(240.0 / bar, 2), "project": p.to_dict()}
+
+
+@app.post("/api/clip/match-key")
+def match_key(track: str, clip: str):
+    """Transpose the clip into the project's key."""
+    p = STATE["current"]
+    t = p.track(track)
+    c = t.clip(clip) if t else None
+    if not c:
+        raise HTTPException(404, "no such clip")
+    if not p.key:
+        raise HTTPException(400, "the project has no key yet")
+    info = audio.analyze(_resolve(c.source, c.file))
+    clip_key = (info.get("key") or {}).get("key", "")
+    semis = warp.semitones_between(clip_key, p.key)
+    if semis is None:
+        raise HTTPException(400, f"couldn't read a key for this clip (got {clip_key!r})")
+    snapshot("clip.match-key")
+    c.pitch = float(semis)
+    return {"from": clip_key, "to": p.key, "semitones": semis,
+            "confidence": (info.get("key") or {}).get("confidence"),
+            "project": p.to_dict()}
 
 
 @app.post("/api/track/add")

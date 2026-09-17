@@ -29,7 +29,9 @@ analysis learned to *suggest* arrangements, not just host them.
 |---|---|
 | **Arrange** | multi-track timeline, drag to move, trim clip edges, split at playhead, snap to real bar lines |
 | **Shape** | per-clip gain and fades with drag handles, track volume, pan, mute/solo |
-| **Warp** | warp maps (pins from source time to timeline time) rendered by Rubber Band; Beats mode keeps hits within ~4 ms of the grid; preview is sample-for-sample identical to the export |
+| **Warp** | warp maps (pins from source time to timeline time) rendered by Rubber Band; Beats mode keeps hits within ~4 ms of the pins; preview is sample-for-sample identical to the export |
+| **Beat-match** | match a clip to the project tempo, or pin every detected bar to the grid (95% of bars land within 20 ms); drag, add and delete warp pins by hand |
+| **Key** | detect a clip's key and transpose it into the project's, by the shortest path |
 | **Stems** | 4-way source separation (Demucs) from the clip menu |
 | **Session** | undo/redo, save/open projects, autosave |
 | **Export** | render to WAV |

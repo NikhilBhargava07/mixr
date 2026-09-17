@@ -22,6 +22,7 @@ Invariants, enforced by normalize():
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 
 SLOPE_RANGE = (0.5, 2.0)     # half speed .. double speed, per segment
@@ -134,3 +135,74 @@ def signature(pins, pitch: float, mode: str) -> str:
     blob = json.dumps([[round(a, 4), round(b, 4)] for a, b in _pairs(pins)]
                       + [round(float(pitch), 3), mode])
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+
+# ---------------------------------------------------------------- auto-warp
+def best_bar(downbeats, bar: float) -> float:
+    """Pick between bar, half and double.
+
+    Downbeat trackers routinely hear half- or double-time (kuthu at 84 comes
+    back as 168). Whichever multiple sits closest to the song's own median bar
+    is the one the listener means.
+    """
+    if len(downbeats) < 2:
+        return bar
+    med = sorted(b - a for a, b in zip(downbeats, downbeats[1:]))[len(downbeats) // 2 - 1]
+    return min((bar / 2, bar, bar * 2), key=lambda b: abs(math.log(b / med)) if med > 0 else 0)
+
+
+def from_downbeats(downbeats, bar: float, anchor_dst: float = 0.0, anchor: int = 0):
+    """One pin per downbeat, each landing on the next bar line of the grid.
+
+    This is what locks a song to the grid even when it drifts: the tracker says
+    where each bar actually starts, and we pin each one to where it should be.
+
+    Downbeats that would demand more stretch than SLOPE_RANGE allows are
+    skipped rather than obeyed — a single mis-detected downbeat shouldn't
+    wrench a whole bar out of shape; the neighbours then span the gap.
+    """
+    pins = []
+    for i, src in enumerate(downbeats):
+        dst = anchor_dst + (i - anchor) * bar
+        if pins:
+            ps, pd = pins[-1]
+            if src - ps < MIN_GAP or dst - pd < MIN_GAP:
+                continue
+            if not SLOPE_RANGE[0] <= (dst - pd) / (src - ps) <= SLOPE_RANGE[1]:
+                continue
+        pins.append([float(src), float(dst)])
+    return pins
+
+
+# ---------------------------------------------------------------- key
+NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+_ALIASES = {"DB": "C#", "EB": "D#", "GB": "F#", "AB": "G#", "BB": "A#",
+            "CB": "B", "FB": "E", "E#": "F", "B#": "C"}
+
+
+def parse_key(key: str):
+    """'F# minor' -> (6, 'minor'). Returns None if it can't be read."""
+    if not key:
+        return None
+    parts = str(key).replace("-", " ").split()
+    if not parts:
+        return None
+    root = parts[0].strip().upper()
+    root = _ALIASES.get(root, root)
+    if root not in NOTES:
+        return None
+    mode = parts[1].lower() if len(parts) > 1 else "major"
+    return NOTES.index(root), ("minor" if mode.startswith("min") else "major")
+
+
+def semitones_between(from_key: str, to_key: str):
+    """Shortest transposition (-6..+6) from one key to another, or None.
+
+    Shortest because +7 and -5 are the same note; the smaller move keeps the
+    audio closer to its original register, which sounds less processed.
+    """
+    a, b = parse_key(from_key), parse_key(to_key)
+    if not a or not b:
+        return None
+    d = (b[0] - a[0]) % 12
+    return d - 12 if d > 6 else d

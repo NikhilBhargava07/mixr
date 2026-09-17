@@ -19,6 +19,10 @@ just refresh the page.
 - drag the blue bar under M/S to change track volume
 - **+ / −** zoom the timeline
 - select a clip and press Delete to remove it
+- right-click a clip for warping: **match project tempo**, **warp every bar to
+  grid**, **match project key**, transpose, and the Beats/Tones warp mode
+- double-click a clip's bottom strip to drop a warp pin, drag a pin to warp the
+  audio around it, alt-click a pin to remove it
 
 ## Where things live
 ```
