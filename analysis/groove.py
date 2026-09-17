@@ -10,7 +10,7 @@ For each segment's drum stem:
   - builds a per-band onset-position histogram = the groove fingerprint
   - estimates swing: mass near 0.5 (straight 8ths) vs 0.62-0.72 (swung/triplet)
 
-Writes reports/groove_<name>.json and .png.
+Writes research/reports/groove_<name>.json and .png.
 """
 import json
 import sys
@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 ROOT = Path(__file__).resolve().parent.parent
 WAV_DIR = ROOT / "workdir" / "wav"
 STEM_DIR = ROOT / "workdir" / "stems" / "htdemucs"
-OUT_DIR = ROOT / "reports"
+OUT_DIR = ROOT / "research" / "reports"
 
 SR = 22050
 HOP = 256  # finer grid for onset timing

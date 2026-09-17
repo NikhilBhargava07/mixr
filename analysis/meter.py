@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 ROOT = Path(__file__).resolve().parent.parent
 WAV_DIR = ROOT / "workdir" / "wav"
 STEM_DIR = ROOT / "workdir" / "stems" / "htdemucs"
-OUT_DIR = ROOT / "reports"
+OUT_DIR = ROOT / "research" / "reports"
 
 SR = 22050
 HOP = 256

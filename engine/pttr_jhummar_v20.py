@@ -1,4 +1,4 @@
-"""PTTR x Jhummar — v20. PER-BAR DOWNBEATS, CONSISTENTLY APPLIED. Built from knowledge/placement_science.md.
+"""PTTR x Jhummar — v20. PER-BAR DOWNBEATS, CONSISTENTLY APPLIED. Built from research/knowledge/placement_science.md.
 
 Every change below traces to a measurement.
 

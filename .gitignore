@@ -36,3 +36,6 @@ reports/lyrics_*.txt
 
 # --- personal data (Google Takeout export)
 library/Takeout/
+
+# --- private companion repo (mixr-research), cloned here
+research/

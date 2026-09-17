@@ -10,7 +10,7 @@ from faster_whisper import WhisperModel
 
 ROOT = Path(__file__).resolve().parent.parent
 STEMS = ROOT / "workdir" / "stems" / "htdemucs"
-OUT = ROOT / "reports"
+OUT = ROOT / "research" / "reports"
 
 # stem -> languages worth trying
 TARGETS = {

@@ -5,7 +5,7 @@ DJ tags are spoken signatures dropped into a mix ("VC on the track",
 in multi-DJ sets that's the only in-audio attribution available.
 
 Usage: tags.py <stem_name> [<stem_name> ...]
-Writes reports/lyrics_<name>.txt and reports/tags_<name>.json
+Writes research/reports/lyrics_<name>.txt and reports/tags_<name>.json
 """
 import json
 import re
@@ -16,7 +16,7 @@ from faster_whisper import WhisperModel
 
 ROOT = Path(__file__).resolve().parent.parent
 STEMS = ROOT / "workdir" / "stems" / "htdemucs"
-OUT = ROOT / "reports"
+OUT = ROOT / "research" / "reports"
 
 # Known circuit DJ tags. Patterns are loose because Whisper garbles names.
 TAG_PATTERNS = {

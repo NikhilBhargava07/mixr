@@ -15,10 +15,10 @@ It exists because mixing software costs ~$400 and most of us are college kids.
 **The editor** (`app/`) — a non-destructive multi-track audio editor that runs
 in a browser. Python/FastAPI backend, vanilla JS frontend, no build step.
 
-**The analysis** (`analysis/`, `knowledge/`, `engine/`) — measuring real
+**The analysis** (`analysis/`, `engine/`) — measuring real
 competition mixes to work out the musical grammar of each dance style: tempo
-conventions, meter, where hits land relative to the downbeat. The findings,
-including the negative results, live in `knowledge/`.
+conventions, meter, where hits land relative to the downbeat. The measurement
+code is here; the data it produces about other teams' sets is kept private.
 
 The point of the pairing: the editor is eventually meant to use what the
 analysis learned to *suggest* arrangements, not just host them.

@@ -1,4 +1,4 @@
-"""PTTR x Jhummar — v18. THE FLAM WAS INSIDE THE KICK. Built from knowledge/placement_science.md.
+"""PTTR x Jhummar — v18. THE FLAM WAS INSIDE THE KICK. Built from research/knowledge/placement_science.md.
 
 Every change below traces to a measurement.
 

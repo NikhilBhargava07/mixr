@@ -19,7 +19,7 @@ import librosa
 ROOT = Path(__file__).resolve().parent.parent
 WAV = ROOT / "workdir" / "wav"
 STEMS = ROOT / "workdir" / "stems" / "htdemucs"
-OUT = ROOT / "reports"
+OUT = ROOT / "research" / "reports"
 
 SR = 22050
 HOP = 256

@@ -1,6 +1,6 @@
 """Transcribe every vocal stem with Whisper for lyric-based song ID.
 
-Writes reports/lyrics_<name>.txt (timestamped lines + detected language).
+Writes research/reports/lyrics_<name>.txt (timestamped lines + detected language).
 Multilingual: language auto-detected per file (English rap transcribes well;
 Hindi/Tamil passable; Punjabi + heavy melisma weak — treat as candidates only).
 """
@@ -9,7 +9,7 @@ from faster_whisper import WhisperModel
 
 ROOT = Path(__file__).resolve().parent.parent
 STEMS = ROOT / "workdir" / "stems" / "htdemucs"
-OUT = ROOT / "reports"
+OUT = ROOT / "research" / "reports"
 
 FILES = [
     "Surma_South_2026_v2",

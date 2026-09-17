@@ -1,4 +1,4 @@
-"""PTTR x Jhummar — v19. PER-BAR DOWNBEATS (no more drift). Built from knowledge/placement_science.md.
+"""PTTR x Jhummar — v19. PER-BAR DOWNBEATS (no more drift). Built from research/knowledge/placement_science.md.
 
 Every change below traces to a measurement.
 

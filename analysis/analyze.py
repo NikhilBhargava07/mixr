@@ -8,7 +8,7 @@ For each WAV in workdir/wav, extracts:
   - percussive vs harmonic energy balance (dhol/drum presence proxy)
   - structural section boundaries (novelty-based)
 
-Writes reports/<name>.json and reports/<name>.png.
+Writes research/reports/<name>.json and reports/<name>.png.
 """
 import json
 import sys
@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent.parent
 WAV_DIR = ROOT / "workdir" / "wav"
-OUT_DIR = ROOT / "reports"
+OUT_DIR = ROOT / "research" / "reports"
 OUT_DIR.mkdir(exist_ok=True)
 
 SR = 22050
