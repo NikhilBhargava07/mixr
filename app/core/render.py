@@ -32,14 +32,17 @@ _lock = threading.Lock()
 def _fade(n: int, fade_in: float, fade_out: float, sr: int) -> np.ndarray:
     """Equal-power-ish linear fades. Even 5ms removes the click you get from
     cutting audio mid-waveform."""
+    # Exactly the ramp Web Audio's linearRampToValueAtTime draws, sample by
+    # sample, so the fades you hear while mixing are the fades that export.
+    # (The preview used to skip fades entirely.)
     env = np.ones(n, dtype=np.float32)
-    fi, fo = int(fade_in * sr), int(fade_out * sr)
+    fi, fo = int(round(fade_in * sr)), int(round(fade_out * sr))
     if fi > 0:
         fi = min(fi, n)
-        env[:fi] *= np.linspace(0.0, 1.0, fi, dtype=np.float32)
+        env[:fi] = np.minimum(env[:fi], np.arange(fi, dtype=np.float32) / fi)
     if fo > 0:
         fo = min(fo, n)
-        env[-fo:] *= np.linspace(1.0, 0.0, fo, dtype=np.float32)
+        env[n - fo:] = np.minimum(env[n - fo:], 1.0 - np.arange(fo, dtype=np.float32) / fo)
     return env
 
 
@@ -56,6 +59,25 @@ def _pan(y: np.ndarray, pan: float) -> np.ndarray:
         return np.stack([L + R * np.cos(x), R * np.sin(x)])
     x = pan * np.pi / 2                           # pan right: fold L into R
     return np.stack([L * np.cos(x), R + L * np.sin(x)])
+
+
+def _read_clip(path, into: float, length: float, sr: int):
+    """A clip's samples, starting at the SAME whole sample the browser uses.
+
+    Both sides round a clip's position to the nearest sample. Before, the
+    export truncated while the browser handed Web Audio a fractional offset —
+    up to a sample apart. Inaudible, but it meant "identical" was only true
+    when offsets happened to land on whole samples.
+    """
+    info = sf.info(str(path))
+    if info.samplerate != sr:                      # needs resampling; can't be sample-exact
+        y, _ = librosa.load(path, sr=sr, mono=False, offset=max(0.0, into), duration=length)
+        return y if y.ndim == 2 else np.stack([y, y])
+    start = max(0, int(round(into * sr)))
+    y, _ = sf.read(str(path), start=start, frames=int(round(length * sr)),
+                   always_2d=True, dtype="float32")
+    y = y.T
+    return y if y.shape[0] == 2 else np.repeat(y[:1], 2, axis=0)
 
 
 def render_project(project, resolve, sr: int = 44100, normalize: bool = True,
@@ -78,19 +100,16 @@ def render_project(project, resolve, sr: int = 44100, normalize: bool = True,
                 continue
             # Read the same (possibly warped) file the browser plays, with
             # offset/length measured on it — so export matches preview exactly.
-            path, base = audio.warped_window(resolve(c.source, c.file), c.warp,
-                                             c.pitch, c.warp_mode, c.offset, c.length)
-            y, _ = librosa.load(path, sr=sr, mono=False,
-                                offset=max(0.0, c.offset - base), duration=c.length)
-            if y.ndim == 1:
-                y = np.stack([y, y])
+            path, base = audio.clip_audio(resolve(c.source, c.file), c.warp, c.pitch,
+                                          c.warp_mode, c.offset, c.length, tr.effects)
+            y = _read_clip(path, c.offset - base, c.length, sr)
 
             m = y.shape[1]
             y = y * _fade(m, c.fade_in, c.fade_out, sr)
             y = y * (c.gain * tr.volume)
             y = _pan(y, tr.pan)
 
-            s = int(c.start * sr)
+            s = int(round(c.start * sr))
             e = min(n, s + m)
             if s < n and e > s:
                 mix[:, s:e] += y[:, : e - s]

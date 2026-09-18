@@ -22,8 +22,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "analysis"))
 sys.path.insert(0, str(ROOT / "engine"))
 
-from app.core import audio, stems, render, warp          # noqa: E402
-from app.core.project import Project, Clip             # noqa: E402
+from app.core import audio, stems, render, warp, fx      # noqa: E402
+from app.core.project import Project, Clip, Effect     # noqa: E402
 
 app = FastAPI(title="mixr", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -171,6 +171,38 @@ def get_audio(source: str, name: str):
     return FileResponse(wav, media_type="audio/wav", filename=wav.name)
 
 
+@app.get("/api/fx")
+def fx_info():
+    """The strip's controls and presets, so the UI never hard-codes a range."""
+    return {"strip": {k: {"off": d, "min": lo, "max": hi} for k, (d, lo, hi) in fx.STRIP.items()},
+            "presets": fx.PRESETS}
+
+
+@app.post("/api/track/effects")
+def track_effects(track: str, payload: dict = Body(...)):
+    """Set a track's strip: {"preset": "Punch"}, {"params": {...}} (merged into
+    what's there), and/or {"enabled": false} to bypass it."""
+    snapshot(f"track.fx:{track}", coalesce=True)
+    t = STATE["current"].track(track)
+    if not t:
+        raise HTTPException(404, "no such track")
+    cur = next((e for e in t.effects if e.kind == "strip"), None)
+    params = dict(cur.params) if cur else {}
+    enabled = cur.enabled if cur else True
+    if "preset" in payload:
+        if payload["preset"] not in fx.PRESETS:
+            raise HTTPException(400, f"unknown preset {payload['preset']!r}")
+        params = dict(fx.PRESETS[payload["preset"]])
+        enabled = True
+    params.update(payload.get("params") or {})
+    enabled = bool(payload.get("enabled", enabled))
+    p = fx.normalize(params)
+    # an all-off strip is stored as no strip, so "Clean" really is untouched audio
+    t.effects = [] if fx.is_identity(p) else [Effect(id=cur.id if cur else Effect().id,
+                                                     kind="strip", enabled=enabled, params=p)]
+    return STATE["current"].to_dict()
+
+
 @app.get("/api/cache")
 def cache_info():
     return audio.cache_stats()
@@ -191,14 +223,15 @@ def _warped_path(body: dict):
     """(path, base) for a clip's audio. `base` is the warped-file time the
     returned audio starts at; the browser subtracts it when scheduling."""
     pins, pitch, mode = _warp_args(body.get("warp"), body.get("pitch"),
-                                   body.get("warp_mode", "beats"))
+                                   body.get("warp_mode", "crisp"))
     try:
         src = _resolve(body["source"], body["name"])
     except KeyError:
         raise HTTPException(400, "body needs source and name")
-    return audio.warped_window(src, pins, pitch, mode,
-                               float(body.get("offset", 0.0)),
-                               float(body.get("length", 0.0)))
+    return audio.clip_audio(src, pins, pitch, mode,
+                            float(body.get("offset", 0.0)),
+                            float(body.get("length", 0.0)),
+                            body.get("effects") or [])
 
 
 @app.post("/api/warp/audio")
@@ -384,7 +417,7 @@ def add_clip(track: str, payload: dict = Body(...)):
     if pins is None and "stretch" in payload:
         pins = warp.uniform(float(payload["stretch"]))
     c.warp, c.pitch, c.warp_mode = _warp_args(pins, payload.get("pitch"),
-                                              payload.get("warp_mode", "beats"))
+                                              payload.get("warp_mode", "crisp"))
     if not payload.get("length"):          # a whole-file clip spans the WARPED file
         c.length = warp.src_to_dst(c.warp, info["duration"])
     return {"clip": c.id, "project": p.to_dict()}

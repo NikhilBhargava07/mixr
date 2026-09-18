@@ -52,7 +52,7 @@ def cache_stats() -> dict:
     files = [f for f in CACHE.glob("*") if f.is_file()]
     by = {}
     for f in files:
-        kind = ("warp render" if f.name.startswith(("warp_", "win_"))
+        kind = ("warp render" if f.name.startswith(("warp_", "win_", "fx_"))
                 else "converted audio" if f.suffix == ".wav"
                 else "waveform" if f.name.startswith("wave_")
                 else "analysis")
@@ -97,7 +97,7 @@ def clear_cache(kind: str = "renders") -> int:
     for f in CACHE.glob("*"):
         if not f.is_file():
             continue
-        if kind == "renders" and not (f.name.startswith(("warp_", "win_")) or f.suffix == ".wav"):
+        if kind == "renders" and not (f.name.startswith(("warp_", "win_", "fx_")) or f.suffix == ".wav"):
             continue
         size = f.stat().st_size
         try:
@@ -115,50 +115,39 @@ _warp_locks: dict[str, threading.Lock] = {}
 _warp_guard = threading.Lock()
 
 
-def warped(path: Path, pins=(), pitch: float = 0.0, mode: str = "beats") -> Path:
+def _render_to(out: Path, y, sr, pins, out_dur, pitch, mode):
+    """Render through a warp mode and write the result atomically."""
+    from . import stretch
+    res = stretch.render(y, sr, pins, out_dur, pitch, mode)
+    tmp = out.with_name(out.stem + ".part.wav")
+    sf.write(tmp, res.T, sr)
+    tmp.replace(out)                                   # never serve half a file
+    prune_cache()
+
+
+def warped(path: Path, pins=(), pitch: float = 0.0, mode: str = "crisp") -> Path:
     """The whole file, warped by a pin map and/or pitch-shifted, as a cached WAV.
 
-    Preview and export both read this exact file, so what you hear in the
-    browser is sample-for-sample what gets rendered.
-
-    Engine choice was measured on a click track (tests/warp_accuracy.py):
-      beats  R2, --crisp 6   hits land within ~3 ms of where the pins put them
-      tones  R2, default     smoother on sustained sound, but hits land ~16 ms
-                             EARLY — a flam-sized error on drums
-    R3 (--fine) sounds finer but ignores --timemap entirely, so it's unusable.
+    How the sound is treated depends on the mode — see app/core/stretch.py,
+    where each mode's measured behaviour is written down.
     """
     from . import warp as W
     pins = list(pins)
     if not pins and abs(pitch) < 1e-6:
         return to_wav(path)
-    if mode not in W.MODES:
-        raise ValueError(f"unknown warp mode {mode!r}")
     src = to_wav(path)
     out = CACHE / f"warp_{_key(path)}_{W.signature(pins, pitch, mode)}.wav"
     with _warp_guard:
         lock = _warp_locks.setdefault(out.name, threading.Lock())
     with lock:
         if not out.exists():
-            import soundfile as sf
-            info = sf.info(str(src))
-            cmd = ["rubberband", "-q", "-p", f"{pitch:.3f}"]
-            if mode == "beats":
-                cmd += ["-c", "6"]
-            else:
-                cmd += ["-F"]                      # keep vocal formants when repitching
-            tmp = out.with_name(out.stem + ".part.wav")
-            if pins:
-                frames, end = W.rubberband_map(pins, info.duration, info.samplerate)
-                mapfile = out.with_name(out.stem + ".map.txt")
-                mapfile.write_text("".join(f"{a} {b}\n" for a, b in frames))
-                cmd += ["-D", f"{end:.6f}", "-M", str(mapfile)]
-            subprocess.run(cmd + [str(src), str(tmp)], check=True, capture_output=True)
-            tmp.replace(out)
-            prune_cache()
+            y, sr = sf.read(str(src), always_2d=True)
+            y = y.T.astype(np.float32)
+            _render_to(out, y, sr, pins, W.src_to_dst(pins, y.shape[1] / sr), pitch, mode)
     return out
 
 
-def warped_window(path: Path, pins=(), pitch: float = 0.0, mode: str = "beats",
+def warped_window(path: Path, pins=(), pitch: float = 0.0, mode: str = "crisp",
                   offset: float = 0.0, length: float = 0.0):
     """Warp only the stretch of a file that a clip actually plays.
 
@@ -168,8 +157,8 @@ def warped_window(path: Path, pins=(), pitch: float = 0.0, mode: str = "beats",
 
     Preview and export both come through here with the same clip numbers, so
     they get the same cached file and stay sample-for-sample identical. The
-    slice is padded well beyond the clip, so Rubber Band's edge behaviour never
-    lands inside the audio you actually hear.
+    slice is padded well beyond the clip, so edge behaviour never lands inside
+    the audio you actually hear.
     """
     from . import warp as W
     pins = list(pins)
@@ -190,24 +179,38 @@ def warped_window(path: Path, pins=(), pitch: float = 0.0, mode: str = "beats",
     with _warp_guard:
         lock = _warp_locks.setdefault(out.name, threading.Lock())
     with lock:
-        if out.exists():
-            return out, base
-        sub, _ = W.sub_map(pins, s0, s1)
-        sr = info.samplerate
-        y, _ = sf.read(str(src), start=int(s0 * sr), stop=int(s1 * sr), always_2d=True)
-        slice_wav = out.with_name(out.stem + ".src.wav")
-        sf.write(slice_wav, y, sr)
-        mapfile = out.with_name(out.stem + ".map.txt")
-        mapfile.write_text("".join(f"{round(a * sr)} {round(b * sr)}\n" for a, b in sub))
-        cmd = ["rubberband", "-q", "-p", f"{pitch:.3f}"]
-        cmd += ["-c", "6"] if mode == "beats" else ["-F"]
-        tmp = out.with_name(out.stem + ".part.wav")
-        subprocess.run(cmd + ["-D", f"{sub[-1][1]:.6f}", "-M", str(mapfile),
-                              str(slice_wav), str(tmp)], check=True, capture_output=True)
-        tmp.replace(out)
-        slice_wav.unlink(missing_ok=True)
-        mapfile.unlink(missing_ok=True)
-        prune_cache()
+        if not out.exists():
+            sub, _ = W.sub_map(pins, s0, s1)
+            sr = info.samplerate
+            y, _ = sf.read(str(src), start=int(s0 * sr), stop=int(s1 * sr), always_2d=True)
+            _render_to(out, y.T.astype(np.float32), sr, sub, sub[-1][1], pitch, mode)
+    return out, base
+
+
+def clip_audio(path: Path, pins=(), pitch: float = 0.0, mode: str = "crisp",
+               offset: float = 0.0, length: float = 0.0, effects=None):
+    """Everything a clip plays: its warped window, through its track's strip.
+
+    Returns (wav path, base) like warped_window. This is the ONE place preview
+    (the browser) and export (render.py) both get audio from, which is what
+    keeps them sample-for-sample identical.
+    """
+    from . import fx
+    wav, base = warped_window(path, pins, pitch, mode, offset, length)
+    p = fx.params_of(effects)
+    if p is None:
+        return wav, base
+    out = CACHE / f"fx_{wav.stem}_{fx.signature(p)}.wav"
+    with _warp_guard:
+        lock = _warp_locks.setdefault(out.name, threading.Lock())
+    with lock:
+        if not out.exists():
+            y, sr = sf.read(str(wav), always_2d=True)
+            res = fx.apply(y.T.astype(np.float32), sr, p)
+            tmp = out.with_name(out.stem + ".part.wav")
+            sf.write(tmp, res.T, sr)
+            tmp.replace(out)
+            prune_cache()
     return out, base
 
 

@@ -48,7 +48,7 @@ class Clip:
     # measured on THAT copy. `warp` is a list of [src, dst] pins in seconds —
     # see app/core/warp.py. Empty = unwarped. A plain stretch is two pins.
     warp: list = field(default_factory=list)
-    warp_mode: str = "beats"  # "beats" keeps transients on time; "tones" is smoother
+    warp_mode: str = "crisp"  # crisp | tones | slice | repitch — see app/core/stretch.py
     pitch: float = 0.0        # semitones
 
     @property
@@ -94,6 +94,9 @@ def _migrate_clip(cd: dict) -> dict:
     s = cd.pop("stretch", 1.0)
     if not cd.get("warp") and abs(s - 1.0) > 1e-9:
         cd["warp"] = [[0.0, 0.0], [1.0, s]]
+    # "beats" was renamed "crisp" when real Ableton-style slicing arrived
+    if cd.get("warp_mode") == "beats":
+        cd["warp_mode"] = "crisp"
     return cd
 
 

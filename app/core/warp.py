@@ -27,7 +27,7 @@ import json
 
 SLOPE_RANGE = (0.5, 2.0)     # half speed .. double speed, per segment
 MIN_GAP = 0.001              # pins closer than 1 ms are treated as a mistake
-MODES = ("beats", "tones")
+MODES = ("crisp", "tones", "slice", "repitch")   # see app/core/stretch.py
 
 
 class WarpError(ValueError):

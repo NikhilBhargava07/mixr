@@ -32,13 +32,15 @@ analysis learned to *suggest* arrangements, not just host them.
 | **Warp** | warp maps (pins from source time to timeline time) rendered by Rubber Band; Beats mode keeps hits within ~4 ms of the pins; only the stretch a clip uses is rendered, so edits land in ~1.5 s instead of ~17 s |
 | **Beat-match** | match a clip to the project tempo, or pin every detected bar to the grid (95% of bars land within 20 ms); drag, add and delete warp pins by hand |
 | **Key** | detect a clip's key and transpose it into the project's, by the shortest path |
+| **Warp modes** | Crisp, Tones, Slice (Ableton-style: every drum hit unstretched, full punch, hits within 1.6 ms) and Re-Pitch |
+| **Sound** | a per-track channel strip — low boost, punch (transient), drive, compress, steep high/low-pass, output — with presets |
 | **Stems** | 4-way source separation (Demucs) from the clip menu |
 | **Session** | undo/redo, save/open projects, autosave |
 | **Export** | render to WAV |
 
 ## What's missing
 
-Effects (EQ/filter/reverb), automation lanes, copy/paste, crossfades, loop
+Reverb/delay, automation lanes, copy/paste, crossfades, loop
 regions, track reordering, and hosting. The AI-assisted arranging that
 motivated the whole thing hasn't been started.
 

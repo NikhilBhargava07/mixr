@@ -8,8 +8,8 @@ where warp.src_to_dst() says they should be.
 
 The onset detector has its own bias (~+3 ms on these clicks), so each click's
 error on the ORIGINAL file is subtracted first: what's left is what warping
-added. Passing bar: beats mode within 5 ms of that. Tones mode is reported,
-not enforced — it's known to pull hits ~16 ms early.
+added. Passing bar: crisp, slice and repitch within 5 ms of that. Tones mode is
+reported, not enforced — it's known to pull hits ~16 ms early.
 """
 import tempfile
 from pathlib import Path
@@ -64,9 +64,9 @@ def main():
                 e = raw - baseline
                 length_ok = abs(sf.info(str(out)).duration
                                 - warp.src_to_dst(pins, sf.info(str(src)).duration)) < 0.01
-                ok = length_ok and (mode != "beats" or np.abs(e).max() <= TOL_MS)
+                ok = length_ok and (mode == "tones" or np.abs(e).max() <= TOL_MS)
                 failed += not ok
-                print(f"{'PASS' if ok else 'FAIL'}  {mode:5s}  {name:24s} "
+                print(f"{'PASS' if ok else 'FAIL'}  {mode:7s}  {name:24s} "
                       f"mean {e.mean():+6.1f} ms   worst {np.abs(e).max():5.1f} ms"
                       f"   (raw worst {np.abs(raw).max():4.1f})"
                       f"{'' if length_ok else '   LENGTH WRONG'}")
@@ -77,11 +77,11 @@ def main():
         long_src = Path(d) / "long.wav"
         long_times = click_track(long_src, n=240, every=0.5, first=0.25, dur=121.0)
         long_base = errors_ms(long_src, long_times)
-        for name, pins in {"uniform 1.075 (slower)": warp.uniform(1.075),
+        for mode, name, pins in [(m, n, p) for m in ("crisp", "slice", "repitch") for n, p in {"uniform 1.075 (slower)": warp.uniform(1.075),
                            "uniform 0.9 (faster)": warp.uniform(0.9),
                            "drift fix (4 pins)": warp.normalize(
-                               [[0, 0], [30, 31.5], [60, 61.0], [90, 92.0]])}.items():
-            out, base = audio.warped_window(long_src, pins, 0.0, "beats", 40.0, 20.0)
+                               [[0, 0], [30, 31.5], [60, 61.0], [90, 92.0]])}.items()]:
+            out, base = audio.warped_window(long_src, pins, 0.0, mode, 40.0, 20.0)
             assert base > 0, "window should not cover the whole file"
             exp = np.array([warp.src_to_dst(pins, t) for t in long_times])
             dur = sf.info(str(out)).duration
@@ -89,7 +89,7 @@ def main():
             e = errors_ms(out, exp[inside] - base) - long_base[inside]
             ok = np.abs(e).max() <= TOL_MS
             failed += not ok
-            print(f"{'PASS' if ok else 'FAIL'}  beats  {name:24s} "
+            print(f"{'PASS' if ok else 'FAIL'}  {mode:7s}  {name:24s} "
                   f"mean {e.mean():+6.1f} ms   worst {np.abs(e).max():5.1f} ms"
                   f"   ({inside.sum()} clicks, window starts {base:.1f}s in)")
 

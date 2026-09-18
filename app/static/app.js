@@ -31,16 +31,33 @@ const post = (path, body) =>
 // Clip.end is a Python @property, so it never survives the trip to JSON —
 // reading c.end here silently gave undefined, and every comparison against it
 // was false. That made clips unclickable: no select, drag, trim or fade.
+// Run the audio graph at the project's rate (44.1 kHz), not the hardware's.
+// Left to default, a Mac usually picks 48 kHz and every clip gets resampled on
+// decode — so preview and export would be computed at different rates. The
+// browser still converts the final output to the hardware rate, once, at the
+// very end, which is unavoidable and changes nothing upstream.
+const makeContext = () => new (window.AudioContext || window.webkitAudioContext)(
+  { sampleRate: (project && project.sample_rate) || 44100 });
 const clipEnd = (c) => c.start + c.length;
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 
-// A clip's audio is identified by its file AND its warp: the same song under
-// two warp maps is two different files on the server, with two waveforms.
-// warpOf() pulls out just those fields, so it can be copied onto new clips.
-const warpOf = (c) => ({ warp: c.warp || [], warp_mode: c.warp_mode || "beats", pitch: c.pitch || 0 });
+// A clip's audio is identified by its file, its warp AND its track's channel
+// strip: the same song under two warp maps, or through two strips, is two
+// different files on the server, with two different waveforms.
+// warpOf() pulls out just the clip's own fields, so they copy onto new clips.
+const warpOf = (c) => ({ warp: c.warp || [], warp_mode: c.warp_mode || "crisp", pitch: c.pitch || 0 });
 const isWarped = (c) => (c.warp && c.warp.length > 0) || Math.abs(c.pitch || 0) > 1e-6;
+// The strip lives on the track, so look the clip's track up. Objects that
+// aren't in the project yet (a file being added) have no strip.
+function fxOf(c) {
+  if (!project || !c.id) return [];
+  for (const tr of project.tracks) if (tr.clips.some(x => x.id === c.id)) return tr.effects || [];
+  return [];
+}
+const hasFx = (c) => fxOf(c).some(e => e.kind === "strip" && e.enabled !== false);
+const needsRender = (c) => isWarped(c) || hasFx(c);
 const key = (c) => `${c.source}/${c.file}` +
-  (isWarped(c) ? `@${JSON.stringify(warpOf(c))}@${windowFor(c)}` : "");
+  (needsRender(c) ? `@${JSON.stringify(warpOf(c))}@${windowFor(c)}@${JSON.stringify(fxOf(c))}` : "");
 const plainQuery = (c) => `source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}`;
 // Must match WINDOW_PAD / WINDOW_STEP in app/core/warp.py. Only used for cache
 // keys here — the server computes the real window and reports where it starts.
@@ -50,7 +67,7 @@ const windowFor = (c) => [
   Math.ceil((c.offset + c.length + WINDOW_PAD) / WINDOW_STEP) * WINDOW_STEP,
 ];
 const warpBody = (c, extra) => JSON.stringify({
-  source: c.source, name: c.file, ...warpOf(c),
+  source: c.source, name: c.file, ...warpOf(c), effects: fxOf(c),
   offset: c.offset, length: c.length, ...extra });
 
 // Where a warp pin sits on the timeline. A pin is [src, dst] in warped-file
@@ -96,7 +113,7 @@ function speedOf(c) {
 async function getWave(c) {
   const k = key(c);
   if (!waveCache.has(k)) {
-    waveCache.set(k, isWarped(c)
+    waveCache.set(k, needsRender(c)
       ? await api("/api/warp/waveform", { method: "POST", headers: { "Content-Type": "application/json" },
                                           body: warpBody(c, { buckets: 1600 }) })
       : await api(`/api/waveform?${plainQuery(c)}&buckets=1600`));
@@ -106,8 +123,8 @@ async function getWave(c) {
 async function getBuffer(c) {
   const k = key(c);
   if (!bufCache.has(k)) {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    const r = isWarped(c)
+    actx = actx || makeContext();
+    const r = needsRender(c)
       ? await fetch("/api/warp/audio", { method: "POST", headers: { "Content-Type": "application/json" },
                                          body: warpBody(c) })
       : await fetch(`/api/audio?${plainQuery(c)}`);
@@ -411,12 +428,61 @@ function currentTime() {
   return playOffset + (actx.currentTime - playStart);
 }
 
+// Build and start one clip's nodes: source -> gain (with fades) -> pan -> out.
+// Live playback and the offline check (previewOffline) both call this, so the
+// check measures the real code path, not a re-implementation of it.
+function scheduleClip(ctx, out, tr, c, t0, startTime) {
+  const { buffer, base } = bufCache.get(key(c));
+  const sr = buffer.sampleRate;
+  const skip = Math.max(0, t0 - c.start);            // how far into the clip we begin
+  const dur = c.length - skip;
+  if (dur <= 0) return null;
+
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  const gain = ctx.createGain();
+  const pan = ctx.createStereoPanner();
+  pan.pan.value = tr.pan;
+  src.connect(gain).connect(pan).connect(out);
+
+  // The rendered audio starts at `base` in warped-file time, not at 0.
+  // Both the offset and the clip's position are whole samples, the same way
+  // the export reads them (render.py _read_clip).
+  const into = Math.max(0, Math.round((c.offset - base + skip) * sr) / sr);
+  const at = startTime + Math.round(Math.max(0, c.start - t0) * sr) / sr;
+
+  // Fades: the same straight-line ramps render.py applies.
+  const g = tr.volume * c.gain;
+  const fi = Math.min(c.fade_in || 0, c.length), fo = Math.min(c.fade_out || 0, c.length);
+  const envAt = (x) => Math.max(0, Math.min(1, fi > 0 ? x / fi : 1, fo > 0 ? (c.length - x) / fo : 1));
+  gain.gain.setValueAtTime(g * envAt(skip), at);
+  if (skip < fi) gain.gain.linearRampToValueAtTime(g, at + (fi - skip));
+  if (fo > 0) {
+    if (skip < c.length - fo) gain.gain.setValueAtTime(g, at + (c.length - fo - skip));
+    gain.gain.linearRampToValueAtTime(0, at + dur);
+  }
+  src.start(at, into, dur);
+  return src;
+}
+
+// Render what live playback would produce, offline, through scheduleClip.
+// Used to prove preview == export against the browser's real audio engine.
+async function previewOffline(seconds, sr = 44100) {
+  const soloed = project.tracks.some(t => t.solo);
+  const ctx = new OfflineAudioContext(2, Math.ceil(seconds * sr), sr);
+  for (const tr of project.tracks) {
+    if (tr.mute || (soloed && !tr.solo)) continue;
+    for (const c of tr.clips) { await getBuffer(c); scheduleClip(ctx, ctx.destination, tr, c, 0, 0); }
+  }
+  return ctx.startRendering();
+}
+
 let starting = false;   // true while play() is waiting on buffers
 
 async function play() {
   if (!project || playing || starting) return;   // a second press mid-load would double the audio
   follow = true;      // pressing play means "show me what's playing"
-  actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+  actx = actx || makeContext();
   await actx.resume();
   const t0 = playOffset;
   const soloed = project.tracks.some(t => t.solo);
@@ -438,21 +504,8 @@ async function play() {
   liveNodes = [];
 
   for (const { tr, c } of jobs) {
-    const { buffer, base } = bufCache.get(key(c));
-    const src = actx.createBufferSource();
-    src.buffer = buffer;
-    const gain = actx.createGain();
-    gain.gain.value = tr.volume * c.gain;
-    const pan = actx.createStereoPanner();
-    pan.pan.value = tr.pan;
-    src.connect(gain).connect(pan).connect(actx.destination);
-
-    const when = Math.max(0, c.start - t0);          // seconds from now
-    // the rendered audio starts at `base` in warped-file time, not at 0
-    const into = Math.max(0, c.offset - base + Math.max(0, t0 - c.start));
-    const dur = c.length - Math.max(0, t0 - c.start);
-    if (dur > 0) src.start(playStart + when, into, dur);
-    liveNodes.push(src);
+    const src = scheduleClip(actx, actx.destination, tr, c, t0, playStart);
+    if (src) liveNodes.push(src);
   }
   $("play").textContent = "Pause";
   tick();
@@ -879,7 +932,7 @@ function updateTitle() {
 
 // Autosave: only writes when something actually changed, so it is nearly free.
 setInterval(async () => {
-  if (!project || !project.tracks.length) return;
+  if (!project || !Array.isArray(project.tracks) || !project.tracks.length) return;
   const snap = JSON.stringify(project);
   if (snap === lastAutosave) return;
   lastAutosave = snap;
@@ -1021,6 +1074,8 @@ function trackMenu(tr, px, py) {
         project = await post(`/api/track/update?track=${tr.id}`, { solo: !tr.solo });
         if (playing) { pause(); play(); } render(); } },
     { sep: true },
+    { label: "Sound…  (low end, punch, drive, compress)", run: () => soundMenu(tr, px, py) },
+    { sep: true },
     { label: busy ? "Separating…" : "Separate into stems", disabled: busy || !tr.clips.length,
       run: () => separateStems(tr) },
     { sep: true },
@@ -1132,6 +1187,80 @@ window.addEventListener("mouseup", async () => {
   if ((c.pitch || 0) !== v) await applyWarp(tr, c, { pitch: v });
 });
 
+// What each warp mode does to the sound — measured, see app/core/stretch.py.
+const WARP_MODES = {
+  crisp:   { name: "Crisp",    hint: "general purpose · hits within ~4 ms" },
+  tones:   { name: "Tones",    hint: "vocals & 808s · smoothest, keeps attacks sharp" },
+  slice:   { name: "Slice",    hint: "drums · every hit unstretched, full punch" },
+  repitch: { name: "Re-Pitch", hint: "like a record · slower is lower" },
+};
+
+function modeMenu(tr, c, px, py) {
+  const cur = c.warp_mode || "crisp";
+  openMenu(px, py, Object.entries(WARP_MODES).map(([id, m]) => ({
+    label: `${id === cur ? "● " : "○ "}${m.name}  —  ${m.hint}`,
+    run: () => id === cur ? null : applyWarp(tr, c, { warp_mode: id }),
+  })), "Warp mode");
+}
+
+// ---------------------------------------------------------------- sound
+// The track's channel strip. Ranges and presets come from the server
+// (/api/fx), so the UI never disagrees with what the renderer will accept.
+let FX = null;
+const FX_LABELS = {
+  low_db: ["Low boost", v => (v > 0 ? "+" : "") + v.toFixed(1) + " dB", 0.5],
+  low_hz: ["   at", v => Math.round(v) + " Hz", 5],
+  punch: ["Punch", v => (v > 0 ? "+" : "") + Math.round(v * 100) + "%", 0.05],
+  drive_db: ["Drive", v => v.toFixed(1) + " dB", 0.5],
+  comp: ["Compress", v => Math.round(v * 100) + "%", 0.05],
+  hp_hz: ["High-pass", v => v <= 20 ? "off" : Math.round(v) + " Hz", 5],
+  lp_hz: ["Low-pass", v => v >= 20000 ? "off" : Math.round(v) + " Hz", 10],
+  gain_db: ["Output", v => (v > 0 ? "+" : "") + v.toFixed(1) + " dB", 0.5],
+};
+
+// Like Transpose: a slider fires every pixel and each value is a fresh
+// render, so only the value you let go on gets sent.
+let pendingFx = null;
+window.addEventListener("mouseup", async () => {
+  if (!pendingFx) return;
+  const { tr, params } = pendingFx;
+  pendingFx = null;
+  await setSound(tr, { params });
+});
+
+async function setSound(tr, body) {
+  setStatus("applying sound…");
+  try {
+    project = await post(`/api/track/effects?track=${tr.id}`, body);
+    render();
+    const t2 = project.tracks.find(x => x.id === tr.id);
+    for (const c of t2.clips) await getWave(c);
+    render();
+    const on = (t2.effects || []).find(e => e.kind === "strip");
+    setStatus(`${t2.name}: ${on ? (on.enabled ? "strip on" : "strip bypassed") : "clean"}`);
+  } catch (e) { setStatus(`sound failed: ${e.message}`); }
+}
+
+async function soundMenu(tr, px, py) {
+  FX = FX || await api("/api/fx");
+  const strip = (tr.effects || []).find(e => e.kind === "strip");
+  const cur = strip ? strip.params : {};
+  const val = (k) => (k in cur ? cur[k] : FX.strip[k].off);
+  const items = Object.keys(FX.presets).map(name => ({
+    label: `Preset: ${name}`, run: () => setSound(tr, { preset: name }),
+  }));
+  items.push({ sep: true });
+  for (const [k, [label, fmt, step]] of Object.entries(FX_LABELS)) {
+    const r = FX.strip[k];
+    items.push({ slider: true, label, min: r.min, max: r.max, step, value: val(k), fmt,
+      oninput: (v) => { pendingFx = { tr, params: { ...(pendingFx ? pendingFx.params : {}), [k]: v } }; } });
+  }
+  items.push({ sep: true });
+  if (strip) items.push({ label: strip.enabled ? "Bypass (hear it dry)" : "Turn strip back on",
+                          run: () => setSound(tr, { enabled: !strip.enabled }) });
+  openMenu(px, py, items, `Sound · ${tr.name}`);
+}
+
 function clipMenu(tr, c, px, py) {
   const at = currentTime();
   const canSplit = c.start + 0.05 < at && at < c.start + c.length - 0.05;
@@ -1163,9 +1292,9 @@ function clipMenu(tr, c, px, py) {
       oninput: (v) => { pendingPitch = { tr, c, v }; } },
     { label: "Reset speed", disabled: !(c.warp && c.warp.length),
       run: () => applyWarp(tr, c, { warp: [] }) },
-    { label: `Warp mode: ${c.warp_mode === "tones" ? "Tones" : "Beats"}  ⇄`,
+    { label: `Warp mode: ${WARP_MODES[c.warp_mode || "crisp"].name}  ▸`,
       disabled: !isWarped(c),
-      run: () => applyWarp(tr, c, { warp_mode: c.warp_mode === "tones" ? "beats" : "tones" }) },
+      run: () => modeMenu(tr, c, px, py) },
     { sep: true },
     { label: "Delete clip", danger: true, key: "⌫", run: async () => {
         project = await post(`/api/clip/remove?track=${tr.id}&clip=${c.id}`);
