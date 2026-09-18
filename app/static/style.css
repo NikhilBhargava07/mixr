@@ -37,6 +37,13 @@ main{display:grid;grid-template-columns:260px 1fr;height:calc(100vh - 53px)}
 .import:hover{border-color:var(--accent);color:var(--accent)}
 #stage{overflow:auto;padding:0}
 canvas{display:block;width:100%;cursor:default}
+/* horizontal scrollbar under the lanes; starts where the lanes start (HEAD_W) */
+#hscroll{position:relative;height:12px;margin:4px 10px 0 190px;border-radius:6px;
+  background:#1b1f27;cursor:pointer;user-select:none}
+#hthumb{position:absolute;top:2px;bottom:2px;min-width:24px;border-radius:4px;
+  background:#4a5263;cursor:grab}
+#hthumb:hover,#hthumb.drag{background:#6b7486}
+#hthumb.drag{cursor:grabbing}
 .hint{color:var(--muted);font-size:11px;padding:8px 14px;margin:0}
 button{background:var(--accent);color:#06121f;border:0;border-radius:7px;
   padding:6px 14px;font-weight:600;cursor:pointer;font-size:13px}

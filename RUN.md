@@ -18,6 +18,8 @@ just refresh the page.
 - click **M** / **S** on a track to mute / solo
 - drag the blue bar under M/S to change track volume
 - **+ / −** zoom the timeline
+- scroll sideways with a trackpad swipe, **shift + scroll wheel**, or the scrollbar under the tracks
+- **Home** jumps back to the start; **End** to the end
 - select a clip and press Delete to remove it
 - right-click a clip for warping: **match project tempo**, **warp every bar to
   grid**, **match project key**, transpose, and the Beats/Tones warp mode

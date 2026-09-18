@@ -39,6 +39,30 @@ const post = (path, body) =>
 const makeContext = () => new (window.AudioContext || window.webkitAudioContext)(
   { sampleRate: (project && project.sample_rate) || 44100 });
 const clipEnd = (c) => c.start + c.length;
+
+// ---------------------------------------------------------------- scrolling
+// How far right the view can go: the end of the last clip plus a little room
+// to work past it — never endlessly into empty timeline, which is how the view
+// used to get lost off to the right.
+const viewSeconds = () => Math.max(1, ($("timeline").clientWidth - HEAD_W) / pxPerSec);
+function contentEnd() {
+  let end = 0;
+  if (project) for (const tr of project.tracks) for (const c of tr.clips) end = Math.max(end, clipEnd(c));
+  return end + Math.max(8, viewSeconds() * 0.25);
+}
+const maxScroll = () => Math.max(0, contentEnd() - viewSeconds());
+function setScroll(s) {
+  scrollX = Math.max(0, Math.min(maxScroll(), s));
+}
+
+function updateScrollbar() {
+  const bar = $("hscroll"), thumb = $("hthumb");
+  if (!bar || !thumb) return;
+  const total = Math.max(contentEnd(), viewSeconds()), w = bar.clientWidth;
+  thumb.style.width = Math.max(24, (viewSeconds() / total) * w) + "px";
+  thumb.style.left = Math.min(w - thumb.offsetWidth, (scrollX / total) * w) + "px";
+  bar.style.visibility = maxScroll() > 0 ? "visible" : "hidden";
+}
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 
 // A clip's audio is identified by its file, its warp AND its track's channel
@@ -257,6 +281,7 @@ function render() {
     project.downbeats.forEach((t, i) => {
       if (t < visT0 - 1 || t > visT1 + 1) return;
       const px = x(t);
+      if (px < HEAD_W) return;                     // not over the header column
       g.strokeStyle = i % 4 === 0 ? "#5b6478" : "#333a48";
       g.lineWidth = 1;
       g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke();
@@ -293,7 +318,10 @@ function render() {
     g.fillStyle = "#2a2f3a"; g.fillRect(10, y + 62, 160, 6);
     g.fillStyle = tr.color;  g.fillRect(10, y + 62, 160 * Math.min(1, tr.volume), 6);
 
-    // clips
+    // clips — confined to the lane, so a clip scrolled partly off the left
+    // edge can't paint over the track header (names, M/S, volume)
+    g.save();
+    g.beginPath(); g.rect(HEAD_W, y, W - HEAD_W, TRACK_H); g.clip();
     for (const c of tr.clips) {
       const cx = x(c.start), cw = Math.max(2, c.length * pxPerSec);
       if (cx + cw < HEAD_W || cx > W) continue;
@@ -313,9 +341,11 @@ function render() {
       const semis = c.pitch ? `  ·  ${c.pitch > 0 ? "+" : ""}${c.pitch.toFixed(0)} st` : "";
       const tag = w.length > 2 ? `  ·  warped (${w.length} pins)`
                 : w.length === 2 ? `  ·  ${(100 * speedOf(c)).toFixed(1)}% speed` : "";
-      g.fillText(c.name.slice(0, 28) + tag + semis, cx + 6, y + 16);
+      // the label sticks to the visible edge when the clip starts off-screen
+      g.fillText(c.name.slice(0, 28) + tag + semis, Math.max(cx, HEAD_W) + 6, y + 16);
       drawWarpPins(g, c, y + 4, TRACK_H - 12);
     }
+    g.restore();
   });
 
   // playhead
@@ -323,6 +353,7 @@ function render() {
   const px = x(t);
   if (px >= HEAD_W) drawPlayhead(g, px, H, W);
   $("time").textContent = fmt(t);
+  updateScrollbar();
 }
 
 // The playhead is a "funnel": a wide triangular handle sitting in the ruler
@@ -522,7 +553,9 @@ function pause() {
 }
 
 function stopAll() {
-  pause(); playOffset = 0; render();
+  // Stop returns the playhead to the start — so the view goes with it,
+  // rather than leaving you staring at wherever playback had paged to.
+  pause(); playOffset = 0; setScroll(0); render();
 }
 
 // Jump to the top and play. Because audio nodes are single-use, "seeking"
@@ -953,6 +986,12 @@ window.addEventListener("keydown", (e) => {
     e.shiftKey ? doRedo() : doUndo();
   }
   if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); doRedo(); }
+  if (e.key === "Home") {                     // back to the top
+    e.preventDefault();
+    if (playing) restart(); else { playOffset = 0; }
+    setScroll(0); render();
+  }
+  if (e.key === "End") { e.preventDefault(); setScroll(maxScroll()); follow = false; render(); }
 });
 
 /* ================================================================
@@ -1460,15 +1499,15 @@ $("newProj").onclick = async () => {
   updateTitle();
   render(); setStatus("new project");
 };
-$("zoomIn").onclick = () => { pxPerSec = Math.min(400, pxPerSec * 1.4); render(); };
-$("zoomOut").onclick = () => { pxPerSec = Math.max(6, pxPerSec / 1.4); render(); };
+$("zoomIn").onclick = () => { pxPerSec = Math.min(400, pxPerSec * 1.4); setScroll(scrollX); render(); };
+$("zoomOut").onclick = () => { pxPerSec = Math.max(6, pxPerSec / 1.4); setScroll(scrollX); render(); };
 $("snap").onchange = render;
 $("timeline").addEventListener("wheel", (e) => {
   // cmd/ctrl + wheel -> zoom the timeline
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
     pxPerSec = Math.max(4, Math.min(400, pxPerSec * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-    render();
+    setScroll(scrollX); render();
     return;
   }
   // A horizontal gesture (trackpad swipe, or shift+wheel) scrolls the timeline.
@@ -1478,12 +1517,41 @@ $("timeline").addEventListener("wheel", (e) => {
   const horizontal = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
   if (horizontal) {
     e.preventDefault();
-    scrollX = Math.max(0, scrollX + (e.shiftKey ? e.deltaY : e.deltaX) / pxPerSec);
+    // Shift+wheel: macOS reports the motion in deltaX, Windows in deltaY.
+    // Reading only deltaY made it a dead zero on a Mac, in BOTH directions —
+    // so once playback had paged the view right, a mouse couldn't bring it back.
+    const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? $("timeline").clientWidth : 1;
+    setScroll(scrollX + (d * unit) / pxPerSec);
     follow = false;   // you steered; don't yank the view back until next play
     render();
   }
 }, { passive: false });
 window.onresize = render;
+
+// Drag the thumb to scroll; click the bar to jump the view there.
+(() => {
+  const bar = $("hscroll"), thumb = $("hthumb");
+  let grab = null;
+  const secPerPx = () => Math.max(contentEnd(), viewSeconds()) / bar.clientWidth;
+  thumb.addEventListener("mousedown", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    grab = { x: e.clientX, s: scrollX };
+    thumb.classList.add("drag");
+  });
+  bar.addEventListener("mousedown", (e) => {
+    if (e.target === thumb) return;
+    const r = bar.getBoundingClientRect();
+    setScroll((e.clientX - r.left) * secPerPx() - viewSeconds() / 2);   // centre the view there
+    follow = false; render();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!grab) return;
+    setScroll(grab.s + (e.clientX - grab.x) * secPerPx());
+    follow = false; render();
+  });
+  window.addEventListener("mouseup", () => { grab = null; thumb.classList.remove("drag"); });
+})();
 function setStatus(s) { $("status").textContent = s; }
 
 (async () => {
