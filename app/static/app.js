@@ -56,9 +56,19 @@ const warpBody = (c, extra) => JSON.stringify({
 // Where a warp pin sits on the timeline. A pin is [src, dst] in warped-file
 // seconds; the clip shows the window [offset, offset+length) of that file.
 const pinX = (c, pin) => c.start + (pin[1] - c.offset);
-const pinsInWindow = (c) =>
-  (c.warp || []).map((pin, i) => ({ i, pin, t: pinX(c, pin) }))
-                .filter(o => o.t >= c.start - 1e-9 && o.t <= clipEnd(c) + 1e-9);
+
+// A plain stretch is stored as [[0,0],[1,s]] — two bookkeeping pins, not
+// markers anyone placed. Drawing them put a draggable handle one second into
+// every stretched clip that would warp only that first second. Neither the
+// origin pin nor a plain stretch's second pin is shown or grabbable.
+const isPlainStretch = (w) => w.length === 2 && w[0][0] === 0 && w[0][1] === 0 && w[1][0] === 1;
+const pinsInWindow = (c) => {
+  const w = c.warp || [];
+  if (isPlainStretch(w)) return [];
+  return w.map((pin, i) => ({ i, pin, t: pinX(c, pin) }))
+          .filter(o => !(o.pin[0] === 0 && o.pin[1] === 0))
+          .filter(o => o.t >= c.start - 1e-9 && o.t <= clipEnd(c) + 1e-9);
+};
 
 // Inverse of the warp map — the mirror of dst_to_src() in app/core/warp.py.
 // Swapping each pin's two numbers inverts a monotonic piecewise-linear map.
@@ -1174,7 +1184,8 @@ $("timeline").addEventListener("dblclick", async (e) => {
   const c = h.clip;
   const dst = h.t - c.start + c.offset;
   const src = warpDstToSrc(c.warp || [], dst);
-  const pins = [...(c.warp || []), [src, dst]].sort((a, b) => a[0] - b[0]);
+  const base = isPlainStretch(c.warp || []) ? [[0, 0]] : (c.warp || []);
+  const pins = [...base, [src, dst]].sort((a, b) => a[0] - b[0]);
   await applyWarp(h.track, c, { warp: pins });
 });
 
