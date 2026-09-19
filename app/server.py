@@ -62,7 +62,23 @@ AUDIO_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aiff", ".aif", ".ogg"}
 
 # One project held in memory. Multi-project comes later; this keeps the
 # editing endpoints simple while the model settles.
-STATE: dict[str, Project] = {"current": Project(name="Untitled")}
+def _restore_autosave() -> Project:
+    """Start from the autosave, not a blank project.
+
+    Any restart — including --reload after a code edit — used to drop the
+    open project, and everything since the last explicit Save went with it.
+    The browser autosaves every few seconds, so picking that up loses at most
+    those seconds."""
+    f = PROJECTS / "__autosave.json"
+    if f.exists():
+        try:
+            return Project.load(f)
+        except Exception:
+            pass                                # a corrupt autosave shouldn't block startup
+    return Project(name="Untitled")
+
+
+STATE: dict[str, Project] = {"current": _restore_autosave()}
 
 # ---------------------------------------------------------------- undo/redo
 # A project is only numbers and file references, so a full snapshot is tiny
@@ -283,15 +299,35 @@ def new_project(name: str = "Untitled"):
 
 @app.post("/api/project/tempo")
 def set_tempo(bpm: float = Body(...), downbeats: list[float] = Body(default=[]),
-              key: str = Body(default="")):
+              key: str = Body(default=""), clear_downbeats: bool = Body(default=False)):
+    """Sets the tempo NUMBER only — warped clips don't follow. Use
+    /api/project/retempo to change tempo and carry the clips with it.
+
+    clear_downbeats drops an analysed grid so snapping falls back to a plain
+    bpm grid (an empty `downbeats` list means "leave it alone")."""
     snapshot("tempo", coalesce=True)
     p = STATE["current"]
     p.bpm = bpm
-    if downbeats:
+    if clear_downbeats:
+        p.downbeats = []
+    elif downbeats:
         p.downbeats = downbeats
     if key:
         p.key = key
     return p.to_dict()
+
+
+@app.post("/api/project/retempo")
+def retempo(bpm: float = Body(..., embed=True)):
+    """Change the project tempo and carry every warped clip with it."""
+    snapshot("retempo")
+    p = STATE["current"]
+    try:
+        r = p.retempo(bpm)
+    except warp.WarpError as e:
+        UNDO.pop()                                 # nothing changed; don't leave an empty undo step
+        raise HTTPException(400, str(e))
+    return {"ratio": r, "project": p.to_dict()}
 
 
 # ------------------------------------------------------------------ auto-warp

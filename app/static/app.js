@@ -247,8 +247,11 @@ async function addAsTrack(source, file) {
   const r = await post(`/api/clip/add?track=${track}`, { source, file, start: 0 });
   project = r.project;
   await getWave({ source, file });
-  // adopt the first track's grid as the project grid
-  if (!project.downbeats.length) {
+  // Adopt the grid from the FIRST track only. This used to fire whenever the
+  // project had no downbeat list, so adding any later file silently replaced
+  // the project's tempo and key with that file's — leaving the grid at one
+  // tempo and every warped clip at another.
+  if (project.tracks.length === 1 && project.tracks[0].clips.length === 1) {
     const q = `source=${encodeURIComponent(source)}&name=${encodeURIComponent(file)}`;
     const a = await api(`/api/analyze?${q}`);
     if (a.downbeats && a.downbeats.length) {
@@ -354,6 +357,7 @@ function render() {
   if (px >= HEAD_W) drawPlayhead(g, px, H, W);
   $("time").textContent = fmt(t);
   updateScrollbar();
+  showBpm();
 }
 
 // The playhead is a "funnel": a wide triangular handle sitting in the ruler
@@ -1484,6 +1488,12 @@ $("play").onclick = () => (playing ? pause() : play());
 $("stop").onclick = stopAll;
 $("restart").onclick = restart;
 $("export").onclick = exportMix;
+$("bpm").onkeydown = (e) => {
+  e.stopPropagation();                             // not a transport shortcut
+  if (e.key === "Enter") { e.target.blur(); }
+  if (e.key === "Escape") { showBpm(); e.target.blur(); }
+};
+$("bpm").onchange = (e) => applyBpm(e.target.value);
 $("undo").onclick = doUndo;
 $("redo").onclick = doRedo;
 $("save").onclick = () => saveProject();
@@ -1552,6 +1562,36 @@ window.onresize = render;
   });
   window.addEventListener("mouseup", () => { grab = null; thumb.classList.remove("drag"); });
 })();
+// ---------------------------------------------------------------- tempo box
+function showBpm() {
+  const el = $("bpm");
+  if (el && document.activeElement !== el && project) {
+    el.value = (Math.round(project.bpm * 100) / 100).toString();
+  }
+}
+
+// Changing the tempo re-stretches every warped clip (server side), so the
+// audio has to be fetched again — same wait as any warp change.
+async function applyBpm(v) {
+  const bpm = parseFloat(v);
+  if (!project || !isFinite(bpm) || Math.abs(bpm - project.bpm) < 0.005) { showBpm(); return; }
+  const was = playing;
+  if (was) pause();
+  setStatus(`re-warping to ${bpm} BPM…`);
+  try {
+    const r = await post("/api/project/retempo", { bpm });
+    project = r.project;
+    render();
+    await ensureWaves();
+    render();
+    setStatus(`${bpm} BPM — clips kept their place in the bar`);
+  } catch (e) {
+    setStatus(`tempo change failed: ${e.message}`);
+  }
+  showBpm();
+  if (was) play();
+}
+
 function setStatus(s) { $("status").textContent = s; }
 
 (async () => {

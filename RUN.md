@@ -17,6 +17,8 @@ just refresh the page.
 - space = play / pause, and clicking the ruler scrubs
 - click **M** / **S** on a track to mute / solo
 - drag the blue bar under M/S to change track volume
+- type a tempo in the **BPM** box — warped clips follow it, keeping their
+  place in the bar (the clip label shows the resulting speed, e.g. 80.0%)
 - **+ / −** zoom the timeline
 - scroll sideways with a trackpad swipe, **shift + scroll wheel**, or the scrollbar under the tracks
 - **Home** jumps back to the start; **End** to the end

@@ -126,6 +126,39 @@ class Project:
         self.tracks = [t for t in self.tracks if t.id != tid]
         return len(self.tracks) != n
 
+    # ---------------------------------------------------------------- tempo
+    def retempo(self, new_bpm: float) -> float:
+        """Change the tempo the way a DAW does: everything keeps its place in BARS.
+
+        Every timeline time scales by old/new — clip positions, the grid, and
+        the warped timeline inside each clip (its pins' dst, offset, length).
+        So a clip matched to 98 BPM plays at 100.8 afterwards, still on the
+        grid. Clips with no warp map move to keep their bar position but keep
+        their own length: nothing tells mixr what tempo they're in.
+
+        All-or-nothing: every new map is validated before anything changes,
+        so an impossible tempo leaves the project exactly as it was.
+        Returns the ratio applied.
+        """
+        from . import warp
+        if not 20.0 <= new_bpm <= 300.0:
+            raise warp.WarpError("tempo must be between 20 and 300 BPM")
+        r = self.bpm / new_bpm
+        plan = []
+        for t in self.tracks:
+            for c in t.clips:
+                pins = warp.normalize([[s, d * r] for s, d in c.warp]) if c.warp else []
+                plan.append((c, pins))
+        for c, pins in plan:                       # nothing raised: commit
+            c.start *= r
+            if c.warp:
+                c.warp = pins
+                c.offset *= r
+                c.length *= r
+        self.downbeats = [d * r for d in self.downbeats]
+        self.bpm = float(new_bpm)
+        return r
+
     # ---------------------------------------------------------------- timing
     @property
     def duration(self) -> float:
