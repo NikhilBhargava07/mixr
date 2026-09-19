@@ -36,13 +36,14 @@ analysis learned to *suggest* arrangements, not just host them.
 | **Warp modes** | Crisp, Tones, Slice (Ableton-style: every drum hit unstretched, full punch, hits within 1.6 ms) and Re-Pitch |
 | **Sound** | a per-track channel strip — low boost, punch (transient), drive, compress, steep high/low-pass, output — with presets |
 | **Stems** | 4-way source separation (Demucs) from the clip menu |
-| **Session** | undo/redo, save/open projects, autosave |
+| **Session** | undo/redo (batched: pasting six clips is one step), save/open projects, autosave restored on restart |
+| **Editing** | multi-select, group drag, copy/cut/paste at the playhead, duplicate, nudge by a bar |
 | **Export** | render to WAV |
 
 ## What's missing
 
-Reverb/delay, automation lanes, copy/paste, crossfades, loop
-regions, track reordering, and hosting. The AI-assisted arranging that
+Reverb/delay, automation lanes, crossfades, loop regions, track
+reordering, and hosting. The AI-assisted arranging that
 motivated the whole thing hasn't been started.
 
 ## Design notes

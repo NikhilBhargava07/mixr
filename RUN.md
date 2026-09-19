@@ -23,6 +23,9 @@ just refresh the page.
 - scroll sideways with a trackpad swipe, **shift + scroll wheel**, or the scrollbar under the tracks
 - **Home** jumps back to the start; **End** to the end
 - select a clip and press Delete to remove it
+- shift-click to select several clips; ⌘A selects all, Esc clears
+- ⌘C / ⌘X / ⌘V copy, cut and paste at the playhead; ⌘D duplicates after the selection
+- ← → nudge selected clips by a bar (hold alt for 10 ms)
 - right-click a clip for warping: **match project tempo**, **warp every bar to
   grid**, **match project key**, transpose, and the Beats/Tones warp mode
 - double-click a clip's bottom strip to drop a warp pin, drag a pin to warp the

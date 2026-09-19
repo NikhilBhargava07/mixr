@@ -13,7 +13,25 @@ const bufCache = new Map();     // "source/file" -> decoded AudioBuffer
 let actx = null;
 let playing = false, playStart = 0, playOffset = 0;
 let liveNodes = [];
-let selected = null;            // {track, clip}
+// `selection` is the truth: every selected clip. `selected` stays as the
+// last-clicked one, which single-clip actions (split, the clip menu) use.
+let selection = [];             // [{track, clip}]
+let selected = null;            // {track, clip} — the primary
+let clipboard = [];             // copied clips, positions relative to the earliest
+const isSelected = (id) => selection.some(s => s.clip === id);
+function selectOnly(track, clip) { selection = [{ track, clip }]; selected = selection[0]; }
+function selectToggle(track, clip) {
+  const i = selection.findIndex(s => s.clip === clip);
+  if (i >= 0) { selection.splice(i, 1); selected = selection[selection.length - 1] || null; }
+  else { selection.push({ track, clip }); selected = { track, clip }; }
+}
+function clearSelection() { selection = []; selected = null; }
+// the live clip objects behind the selection, skipping anything since deleted
+const selectedClips = () => selection.map(s => {
+  const tr = project.tracks.find(x => x.id === s.track);
+  const c = tr && tr.clips.find(x => x.id === s.clip);
+  return c ? { tr, c } : null;
+}).filter(Boolean);
 
 const TRACK_H = 84, HEAD_W = 190, RULER_H = 30;
 const PH_W = 8, PH_HEAD_H = 13;   // playhead handle: half-width, height
@@ -280,19 +298,16 @@ function render() {
   // ---- ruler + grid
   g.fillStyle = "#1c1f26"; g.fillRect(0, 0, W, RULER_H);
   const visT0 = scrollX, visT1 = scrollX + (W - HEAD_W) / pxPerSec;
-  if (project.downbeats.length) {
-    project.downbeats.forEach((t, i) => {
-      if (t < visT0 - 1 || t > visT1 + 1) return;
-      const px = x(t);
-      if (px < HEAD_W) return;                     // not over the header column
-      g.strokeStyle = i % 4 === 0 ? "#5b6478" : "#333a48";
-      g.lineWidth = 1;
-      g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke();
-      if (i % 4 === 0) {
-        g.fillStyle = "#7c8697"; g.font = "10px system-ui";
-        g.fillText(String(i + 1), px + 3, 12);
-      }
-    });
+  for (const { t: bt, i } of gridBars(visT0 - 1, visT1 + 1)) {
+    const px = x(bt);
+    if (px < HEAD_W) continue;                     // not over the header column
+    g.strokeStyle = i % 4 === 0 ? "#5b6478" : "#333a48";
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke();
+    if (i % 4 === 0) {
+      g.fillStyle = "#7c8697"; g.font = "10px system-ui";
+      g.fillText(String(i + 1), px + 3, 12);
+    }
   }
   for (let s = Math.ceil(visT0); s < visT1; s++) {
     if (s % 5) continue;
@@ -328,7 +343,7 @@ function render() {
     for (const c of tr.clips) {
       const cx = x(c.start), cw = Math.max(2, c.length * pxPerSec);
       if (cx + cw < HEAD_W || cx > W) continue;
-      const isSel = selected && selected.clip === c.id;
+      const isSel = isSelected(c.id);
       g.fillStyle = tr.color + "33";
       g.fillRect(cx, y + 4, cw, TRACK_H - 12);
       g.strokeStyle = isSel ? "#fff" : tr.color;
@@ -666,7 +681,7 @@ $("timeline").addEventListener("mousedown", async (e) => {
     render(); return;
   }
   if (h.kind === "warp-pin") {
-    selected = { track: h.track.id, clip: h.clip.id };
+    selectOnly(h.track.id, h.clip.id);
     if (e.altKey) {                               // alt-click removes a pin
       const pins = h.clip.warp.filter((_, i) => i !== h.pin);
       await applyWarp(h.track, h.clip, { warp: pins });
@@ -678,30 +693,35 @@ $("timeline").addEventListener("mousedown", async (e) => {
     render(); return;
   }
   if (h.kind === "pin-strip") {
-    selected = { track: h.track.id, clip: h.clip.id };
+    selectOnly(h.track.id, h.clip.id);
     render(); return;
   }
   if (h.kind === "clip") {
-    selected = { track: h.track.id, clip: h.clip.id };
+    if (e.shiftKey) { selectToggle(h.track.id, h.clip.id); render(); return; }
+    // clicking a clip that's already in a multi-selection keeps the group,
+    // so you can drag several clips at once
+    if (!isSelected(h.clip.id)) selectOnly(h.track.id, h.clip.id);
+    else selected = { track: h.track.id, clip: h.clip.id };
     drag = { mode: "move", track: h.track, clip: h.clip,
-             grab: h.t - h.clip.start, startVal: h.clip.start };
+             grab: h.t - h.clip.start, startVal: h.clip.start,
+             group: selectedClips().map(({ c }) => ({ c, start: c.start })) };
     render(); return;
   }
   if (h.kind === "fade-in" || h.kind === "fade-out") {
-    selected = { track: h.track.id, clip: h.clip.id };
+    selectOnly(h.track.id, h.clip.id);
     drag = { mode: h.kind, track: h.track, clip: h.clip,
              startVal: { fade_in: h.clip.fade_in, fade_out: h.clip.fade_out } };
     render(); return;
   }
   // --- clip edges ---
   if (h.kind === "trim-left" || h.kind === "trim-right") {
-    selected = { track: h.track.id, clip: h.clip.id };
+    selectOnly(h.track.id, h.clip.id);
     drag = { mode: h.kind, track: h.track, clip: h.clip,
              startVal: { start: h.clip.start, offset: h.clip.offset, length: h.clip.length },
              grabT: h.t };
     render(); return;
   }
-  selected = null; render();
+  clearSelection(); render();
 });
 
 // Hover feedback. The window-level mousemove below only runs mid-drag, so the
@@ -735,7 +755,9 @@ window.addEventListener("mousemove", (e) => {
   if (drag.mode === "move") {
     let ns = Math.max(0, t - drag.grab);
     ns = snap(ns);
-    drag.clip.start = ns;
+    // everything selected moves together, by the same amount
+    const delta = ns - drag.startVal;
+    for (const g of drag.group) g.c.start = Math.max(0, g.start + delta);
     render();
   } else if (drag.mode === "trim-left" || drag.mode === "trim-right") {
     trimDrag(drag, t);
@@ -762,10 +784,17 @@ window.addEventListener("mouseup", async () => {
     return;
   }
 
-  const { track, clip } = drag;
+  const { track, clip, mode, group } = drag;
+  drag = null;
+  if (mode === "move" && group && group.length > 1) {
+    project = await post("/api/clips/update", {
+      updates: group.map(({ c }) => ({
+        track: project.tracks.find(t2 => t2.clips.some(x => x.id === c.id)).id,
+        clip: c.id, patch: { start: c.start } })) });
+    render(); return;
+  }
   const payload = { start: clip.start, offset: clip.offset, length: clip.length,
                     fade_in: clip.fade_in, fade_out: clip.fade_out };
-  drag = null;
   project = await post(`/api/clip/update?track=${track.id}&clip=${clip.id}`, payload);
   render();
 });
@@ -837,7 +866,7 @@ async function playheadDragEnd() {
 async function doUndo() {
   try {
     const r = await post("/api/undo");
-    project = r.project; selected = null; render();
+    project = r.project; clearSelection(); render();
     await ensureWaves();
     setStatus(`undo · ${r.undo} left`);
   } catch (e) { setStatus("nothing to undo"); }
@@ -846,7 +875,7 @@ async function doUndo() {
 async function doRedo() {
   try {
     const r = await post("/api/redo");
-    project = r.project; selected = null; render();
+    project = r.project; clearSelection(); render();
     await ensureWaves();
     setStatus(`redo · ${r.redo} left`);
   } catch (e) { setStatus("nothing to redo"); }
@@ -890,7 +919,7 @@ async function saveProject(askName = false) {
 async function openProjectByName(file) {
   stopAll();
   project = await post(`/api/project/open?name=${encodeURIComponent(file)}`);
-  selected = null; scrollX = 0; playOffset = 0;
+  clearSelection(); scrollX = 0; playOffset = 0;
   bufCache.clear();
   render();
   setStatus(`loading waveforms…`);
@@ -990,6 +1019,11 @@ window.addEventListener("keydown", (e) => {
     e.shiftKey ? doRedo() : doUndo();
   }
   if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); doRedo(); }
+  if (mod && (e.key === "a" || e.key === "A")) { e.preventDefault(); selectAll(); }
+  if (mod && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
+  if (mod && (e.key === "x" || e.key === "X")) { e.preventDefault(); copySelection(true); }
+  if (mod && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard(); }
+  if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelection(); }
   if (e.key === "Home") {                     // back to the top
     e.preventDefault();
     if (playing) restart(); else { playOffset = 0; }
@@ -997,6 +1031,87 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "End") { e.preventDefault(); setScroll(maxScroll()); follow = false; render(); }
 });
+
+/* ================================================================
+   ARRANGEMENT EDITING
+   Multi-clip actions go through the batch endpoints, so each one is a single
+   undo step: pasting six clips undoes as "paste", not six separate adds.
+   ================================================================ */
+// One bar if the project has a tempo, otherwise a second.
+const gridStep = () => (project && project.bpm ? 240 / project.bpm : 1);
+
+// The fields that make a clip what it is — everything except where it sits.
+const clipBody = (c) => ({
+  source: c.source, file: c.file, name: c.name, offset: c.offset, length: c.length,
+  warp: c.warp, warp_mode: c.warp_mode, pitch: c.pitch,
+  gain: c.gain, fade_in: c.fade_in, fade_out: c.fade_out,
+});
+
+async function deleteSelection() {
+  const items = selection.map(s => ({ track: s.track, clip: s.clip }));
+  project = await post("/api/clips/remove", { items });
+  const n = items.length;
+  clearSelection(); render();
+  setStatus(`removed ${n} clip${n > 1 ? "s" : ""}`);
+}
+
+async function nudgeSelection(dt) {
+  const moved = selectedClips();
+  if (!moved.length) return;
+  if (dt < 0 && moved.some(({ c }) => c.start + dt < 0)) return;   // don't pile up at zero
+  for (const { c } of moved) c.start += dt;
+  render();
+  project = await post("/api/clips/update", {
+    coalesce: true,                       // a run of nudges is one undo step
+    updates: moved.map(({ tr, c }) => ({ track: tr.id, clip: c.id, patch: { start: c.start } })),
+  });
+  render();
+}
+
+function copySelection(cut = false) {
+  const picked = selectedClips();
+  if (!picked.length) return;
+  const anchor = Math.min(...picked.map(({ c }) => c.start));
+  clipboard = picked.map(({ tr, c }) => ({ track: tr.id, dt: c.start - anchor, ...clipBody(c) }));
+  setStatus(`${cut ? "cut" : "copied"} ${picked.length} clip${picked.length > 1 ? "s" : ""}`);
+  if (cut) return deleteSelection();
+}
+
+// Paste lands at the playhead, keeping the clips' spacing. A clip whose track
+// is gone goes to the track of the last thing you clicked, or the first track.
+async function pasteClipboard(at = null, from = clipboard) {
+  if (!from.length || !project.tracks.length) return;
+  const start = at !== null ? at : currentTime();
+  const fallback = (selected && selected.track) || project.tracks[0].id;
+  const clips = from.map(c => ({
+    ...c, track: project.tracks.some(t2 => t2.id === c.track) ? c.track : fallback,
+    start: Math.max(0, start + c.dt),
+  }));
+  const r = await post("/api/clips/add", { clips });
+  project = r.project;
+  selection = r.clips.map((id, i) => ({ track: clips[i].track, clip: id }));
+  selected = selection[selection.length - 1] || null;
+  render();
+  await ensureWaves(); render();
+  setStatus(`pasted ${clips.length} clip${clips.length > 1 ? "s" : ""}`);
+}
+
+// Duplicate drops a copy immediately after the selection, the way Ableton does.
+async function duplicateSelection() {
+  const picked = selectedClips();
+  if (!picked.length) return;
+  const anchor = Math.min(...picked.map(({ c }) => c.start));
+  const span = Math.max(...picked.map(({ c }) => clipEnd(c))) - anchor;
+  const copies = picked.map(({ tr, c }) => ({ track: tr.id, dt: c.start - anchor, ...clipBody(c) }));
+  await pasteClipboard(anchor + span, copies);
+}
+
+function selectAll() {
+  selection = project.tracks.flatMap(tr => tr.clips.map(c => ({ track: tr.id, clip: c.id })));
+  selected = selection[selection.length - 1] || null;
+  render();
+  setStatus(`${selection.length} clips selected`);
+}
 
 /* ================================================================
    EXPORT
@@ -1124,7 +1239,8 @@ function trackMenu(tr, px, py) {
     { sep: true },
     { label: "Delete track", danger: true, run: async () => {
         project = await post(`/api/track/remove?track=${tr.id}`);
-        if (selected && selected.track === tr.id) selected = null;
+        selection = selection.filter(s => s.track !== tr.id);
+        if (selected && selected.track === tr.id) selected = selection[selection.length - 1] || null;
         render(); } },
   ], tr.name);
 }
@@ -1317,7 +1433,7 @@ function clipMenu(tr, c, px, py) {
         project = await post(`/api/clip/update?track=${tr.id}&clip=${c.id}`, { gain: v }); } },
     { sep: true },
     { label: "Split at playhead", key: "S", disabled: !canSplit,
-      run: async () => { selected = { track: tr.id, clip: c.id }; await splitSelected(); } },
+      run: async () => { selectOnly(tr.id, c.id); await splitSelected(); } },
     { label: "Duplicate", run: async () => {
         const r = await post(`/api/clip/add?track=${tr.id}`, {
           source: c.source, file: c.file, name: c.name,
@@ -1341,7 +1457,7 @@ function clipMenu(tr, c, px, py) {
     { sep: true },
     { label: "Delete clip", danger: true, key: "⌫", run: async () => {
         project = await post(`/api/clip/remove?track=${tr.id}&clip=${c.id}`);
-        selected = null; render(); } },
+        clearSelection(); render(); } },
   ], c.name);
 }
 
@@ -1377,7 +1493,11 @@ $("timeline").addEventListener("contextmenu", (e) => {
 window.addEventListener("mousedown", (e) => {
   if (!menuEl().contains(e.target)) closeMenu();
 });
-window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  closeMenu();
+  if (selection.length) { clearSelection(); render(); }
+});
 
 /* ================================================================
    STEM SEPARATION
@@ -1446,12 +1566,29 @@ function fadeDrag(d, t) {
   }
 }
 
+// The bar lines between two times. An analysed downbeat list wins — it follows
+// a song that drifts — but with only a tempo we still have a grid: bars from
+// zero at 240/bpm. Snapping and the drawn grid both read from here, so what
+// you see is what you snap to.
+function gridBars(t0, t1) {
+  const out = [];
+  if (!project) return out;
+  if (project.downbeats.length) {
+    project.downbeats.forEach((t, i) => { if (t >= t0 && t <= t1) out.push({ t, i }); });
+    return out;
+  }
+  if (!project.bpm) return out;
+  const bar = 240 / project.bpm;
+  for (let i = Math.max(0, Math.floor(t0 / bar)); i * bar <= t1; i++) out.push({ t: i * bar, i });
+  return out;
+}
+
 function snap(t) {
-  if (!project || !project.downbeats.length || !$("snap").checked) return t;
+  if (!project || !$("snap").checked) return t;
   let best = t, bd = Infinity;
-  for (const d of project.downbeats) {
-    const dd = Math.abs(d - t);
-    if (dd < bd) { bd = dd; best = d; }
+  for (const b of gridBars(t - 8, t + 8)) {
+    const dd = Math.abs(b.t - t);
+    if (dd < bd) { bd = dd; best = b.t; }
   }
   return bd * pxPerSec < 14 ? best : t;
 }
@@ -1464,7 +1601,7 @@ async function splitSelected() {
     const r = await post(`/api/clip/split?track=${selected.track}` +
                          `&clip=${selected.clip}&at=${at}`);
     project = r.project;
-    selected = { track: selected.track, clip: r.right };   // select the new half
+    selectOnly(selected.track, r.right);                   // select the new half
     render();
     setStatus(`split at ${fmt(at)}`);
   } catch (err) {
@@ -1476,10 +1613,15 @@ window.addEventListener("keydown", async (e) => {
   if (e.target.tagName === "INPUT") return;
   if (e.code === "Space") { e.preventDefault(); playing ? pause() : play(); }
   if (e.key === "s" || e.key === "S") { e.preventDefault(); await splitSelected(); }
-  if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+  if ((e.key === "Delete" || e.key === "Backspace") && selection.length) {
     e.preventDefault();
-    project = await post(`/api/clip/remove?track=${selected.track}&clip=${selected.clip}`);
-    selected = null; render();
+    await deleteSelection();
+  }
+  // nudge: one grid step, or 10 ms with alt held
+  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && selection.length) {
+    e.preventDefault();
+    const step = e.altKey ? 0.01 : gridStep();
+    await nudgeSelection((e.key === "ArrowLeft" ? -1 : 1) * step);
   }
 });
 
@@ -1503,7 +1645,7 @@ $("newProj").onclick = async () => {
       !confirm("Clear all tracks and start a new project?")) return;
   stopAll();
   project = await post("/api/project/new?name=Untitled");
-  selected = null; scrollX = 0; playOffset = 0;
+  clearSelection(); scrollX = 0; playOffset = 0;
   bufCache.clear();
   lastAutosave = "";
   updateTitle();

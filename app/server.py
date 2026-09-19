@@ -434,13 +434,9 @@ def update_track(track: str, payload: dict = Body(...)):
     return STATE["current"].to_dict()
 
 
-@app.post("/api/clip/add")
-def add_clip(track: str, payload: dict = Body(...)):
-    snapshot("clip.add")
-    p = STATE["current"]
-    t = p.track(track)
-    if not t:
-        raise HTTPException(404, "no such track")
+def _add_clip(t, payload: dict):
+    """Build one clip on track `t`. Shared by /api/clip/add and the batch
+    endpoints, so a pasted clip is built exactly like a dragged-in one."""
     src = _resolve(payload["source"], payload["file"])
     info = audio.analyze(src)
     length = float(payload.get("length") or info["duration"])
@@ -456,15 +452,24 @@ def add_clip(track: str, payload: dict = Body(...)):
                                               payload.get("warp_mode", "crisp"))
     if not payload.get("length"):          # a whole-file clip spans the WARPED file
         c.length = warp.src_to_dst(c.warp, info["duration"])
-    return {"clip": c.id, "project": p.to_dict()}
+    for k in ("gain", "fade_in", "fade_out"):
+        if k in payload:
+            setattr(c, k, float(payload[k]))
+    t.clips.sort(key=lambda x: x.start)
+    return c
 
 
-@app.post("/api/clip/update")
-def update_clip(track: str, clip: str, payload: dict = Body(...)):
-    snapshot(f"clip.update:{clip}:{''.join(sorted(payload))}", coalesce=True)
-    t = STATE["current"].track(track)
+@app.post("/api/clip/add")
+def add_clip(track: str, payload: dict = Body(...)):
+    snapshot("clip.add")
+    p = STATE["current"]
+    t = p.track(track)
     if not t:
         raise HTTPException(404, "no such track")
+    return {"clip": _add_clip(t, payload).id, "project": p.to_dict()}
+
+
+def _patch_clip(t, clip: str, payload: dict):
     c = t.clip(clip)
     if not c:
         raise HTTPException(404, "no such clip")
@@ -486,6 +491,58 @@ def update_clip(track: str, clip: str, payload: dict = Body(...)):
         if k in payload:
             setattr(c, k, payload[k])
     t.clips.sort(key=lambda x: x.start)
+    return c
+
+
+@app.post("/api/clip/update")
+def update_clip(track: str, clip: str, payload: dict = Body(...)):
+    snapshot(f"clip.update:{clip}:{''.join(sorted(payload))}", coalesce=True)
+    t = STATE["current"].track(track)
+    if not t:
+        raise HTTPException(404, "no such track")
+    _patch_clip(t, clip, payload)
+    return STATE["current"].to_dict()
+
+
+# ------------------------------------------------------------------ batches
+# One snapshot per batch, so pasting six clips is ONE undo step, not six.
+def _tracks_of(items):
+    p = STATE["current"]
+    out = []
+    for it in items:
+        t = p.track(it["track"])
+        if not t:
+            raise HTTPException(404, f"no such track {it['track']}")
+        out.append(t)
+    return out
+
+
+@app.post("/api/clips/add")
+def add_clips(payload: dict = Body(...)):
+    clips = payload.get("clips") or []
+    tracks = _tracks_of(clips)
+    snapshot(f"clips.add:{len(clips)}")
+    ids = [_add_clip(t, c).id for t, c in zip(tracks, clips)]
+    return {"clips": ids, "project": STATE["current"].to_dict()}
+
+
+@app.post("/api/clips/update")
+def update_clips(payload: dict = Body(...)):
+    ups = payload.get("updates") or []
+    tracks = _tracks_of(ups)
+    snapshot(f"clips.update:{len(ups)}", coalesce=bool(payload.get("coalesce")))
+    for t, u in zip(tracks, ups):
+        _patch_clip(t, u["clip"], u.get("patch") or {})
+    return STATE["current"].to_dict()
+
+
+@app.post("/api/clips/remove")
+def remove_clips(payload: dict = Body(...)):
+    items = payload.get("items") or []
+    tracks = _tracks_of(items)
+    snapshot(f"clips.remove:{len(items)}")
+    for t, it in zip(tracks, items):
+        t.clips = [c for c in t.clips if c.id != it["clip"]]
     return STATE["current"].to_dict()
 
 
