@@ -13,6 +13,8 @@ const bufCache = new Map();     // "source/file" -> decoded AudioBuffer
 let actx = null;
 let playing = false, playStart = 0, playOffset = 0;
 let liveNodes = [];
+let buses = {}, master = null;  // per-track audio buses and the master, while playing
+const meters = {};              // trackId (or "master") -> {peak, hold, holdUntil, clipped}
 // `selection` is the truth: every selected clip. `selected` stays as the
 // last-clicked one, which single-clip actions (split, the clip menu) use.
 let selection = [];             // [{track, clip}]
@@ -335,6 +337,8 @@ function render() {
     // volume bar
     g.fillStyle = "#2a2f3a"; g.fillRect(10, y + 62, 160, 6);
     g.fillStyle = tr.color;  g.fillRect(10, y + 62, 160 * Math.min(1, tr.volume), 6);
+    // level meter, down the right edge of the header
+    drawMeter(g, HEAD_W - 16, y + 10, 9, TRACK_H - 24, meterOf(tr.id));
 
     // clips — confined to the lane, so a clip scrolled partly off the left
     // edge can't paint over the track header (names, M/S, volume)
@@ -373,6 +377,7 @@ function render() {
   $("time").textContent = fmt(t);
   updateScrollbar();
   showBpm();
+  drawMasterMeter();
 }
 
 // The playhead is a "funnel": a wide triangular handle sitting in the ruler
@@ -481,6 +486,25 @@ function currentTime() {
 // Build and start one clip's nodes: source -> gain (with fades) -> pan -> out.
 // Live playback and the offline check (previewOffline) both call this, so the
 // check measures the real code path, not a re-implementation of it.
+// One bus per audible track: every clip on it feeds the same gain -> pan
+// chain, so volume and pan act on the track as a whole and the meter reads
+// exactly what you hear. (Volume used to be multiplied into each clip's own
+// gain node, which left nowhere to measure the track.)
+function makeBus(ctx, tr, dest, metered) {
+  const gain = ctx.createGain(); gain.gain.value = tr.volume;
+  const pan = ctx.createStereoPanner(); pan.pan.value = tr.pan;
+  gain.connect(pan);
+  let analyser = null;
+  if (metered) {
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;          // 46 ms — longer than a frame, so no peak slips past
+    pan.connect(analyser); analyser.connect(dest);
+  } else {
+    pan.connect(dest);
+  }
+  return { gain, pan, analyser, data: analyser ? new Float32Array(analyser.fftSize) : null };
+}
+
 function scheduleClip(ctx, out, tr, c, t0, startTime) {
   const { buffer, base } = bufCache.get(key(c));
   const sr = buffer.sampleRate;
@@ -491,9 +515,7 @@ function scheduleClip(ctx, out, tr, c, t0, startTime) {
   const src = ctx.createBufferSource();
   src.buffer = buffer;
   const gain = ctx.createGain();
-  const pan = ctx.createStereoPanner();
-  pan.pan.value = tr.pan;
-  src.connect(gain).connect(pan).connect(out);
+  src.connect(gain).connect(out);                    // `out` is the track's bus
 
   // The rendered audio starts at `base` in warped-file time, not at 0.
   // Both the offset and the clip's position are whole samples, the same way
@@ -502,7 +524,7 @@ function scheduleClip(ctx, out, tr, c, t0, startTime) {
   const at = startTime + Math.round(Math.max(0, c.start - t0) * sr) / sr;
 
   // Fades: the same straight-line ramps render.py applies.
-  const g = tr.volume * c.gain;
+  const g = c.gain;                                  // track volume lives on the bus
   const fi = Math.min(c.fade_in || 0, c.length), fo = Math.min(c.fade_out || 0, c.length);
   const envAt = (x) => Math.max(0, Math.min(1, fi > 0 ? x / fi : 1, fo > 0 ? (c.length - x) / fo : 1));
   gain.gain.setValueAtTime(g * envAt(skip), at);
@@ -520,9 +542,13 @@ function scheduleClip(ctx, out, tr, c, t0, startTime) {
 async function previewOffline(seconds, sr = 44100) {
   const soloed = project.tracks.some(t => t.solo);
   const ctx = new OfflineAudioContext(2, Math.ceil(seconds * sr), sr);
+  const masterOut = ctx.createGain();
+  masterOut.gain.value = Math.pow(10, (project.master_db || 0) / 20);
+  masterOut.connect(ctx.destination);
   for (const tr of project.tracks) {
     if (tr.mute || (soloed && !tr.solo)) continue;
-    for (const c of tr.clips) { await getBuffer(c); scheduleClip(ctx, ctx.destination, tr, c, 0, 0); }
+    const bus = makeBus(ctx, tr, masterOut, false);
+    for (const c of tr.clips) { await getBuffer(c); scheduleClip(ctx, bus.gain, tr, c, 0, 0); }
   }
   return ctx.startRendering();
 }
@@ -553,8 +579,17 @@ async function play() {
   playing = true;
   liveNodes = [];
 
+  master = (() => {
+    const gain = actx.createGain();
+    gain.gain.value = Math.pow(10, (project.master_db || 0) / 20);
+    const analyser = actx.createAnalyser(); analyser.fftSize = 2048;
+    gain.connect(analyser); analyser.connect(actx.destination);
+    return { gain, analyser, data: new Float32Array(analyser.fftSize) };
+  })();
+  buses = {};
+  for (const { tr } of jobs) if (!buses[tr.id]) buses[tr.id] = makeBus(actx, tr, master.gain, true);
   for (const { tr, c } of jobs) {
-    const src = scheduleClip(actx, actx.destination, tr, c, t0, playStart);
+    const src = scheduleClip(actx, buses[tr.id].gain, tr, c, t0, playStart);
     if (src) liveNodes.push(src);
   }
   $("play").textContent = "Pause";
@@ -566,7 +601,9 @@ function pause() {
   playOffset = currentTime();
   liveNodes.forEach(n => { try { n.stop(); } catch (e) {} });
   liveNodes = [];
+  buses = {}; master = null;
   playing = false;
+  silenceMeters();                 // nothing is playing; don't leave bars frozen mid-air
   $("play").textContent = "Play";
   render();
 }
@@ -601,8 +638,131 @@ function followPlayhead() {
   else if (t < scrollX) scrollX = Math.max(0, t - lead);  // seeked/scrolled behind it
 }
 
+/* ================================================================
+   LEVEL METERS
+   Peak metering, read straight off the audio graph. Numbers chosen the way
+   hardware meters behave: the bar falls at a fixed rate so you can read it,
+   and the loudest recent peak hangs for a moment so a brief spike doesn't
+   vanish before you see it.
+   ================================================================ */
+const METER_FLOOR = -60;        // dB at the bottom of the bar
+const METER_FALL = 0.6;         // dB per frame ≈ 36 dB/s
+const HOLD_MS = 1200;
+
+function meterOf(id) {
+  return meters[id] || (meters[id] = { peak: -Infinity, hold: -Infinity, holdUntil: 0, clipped: false });
+}
+
+function readMeter(id, bus, now) {
+  const m = meterOf(id);
+  if (!bus || !bus.analyser) { m.peak = Math.max(METER_FLOOR, m.peak - METER_FALL * 3); return m; }
+  bus.analyser.getFloatTimeDomainData(bus.data);
+  let pk = 0;
+  for (let i = 0; i < bus.data.length; i++) { const v = Math.abs(bus.data[i]); if (v > pk) pk = v; }
+  const db = pk > 0 ? 20 * Math.log10(pk) : -Infinity;
+  m.peak = Math.max(db, m.peak - METER_FALL);       // instant attack, slow fall
+  if (db >= m.hold || now > m.holdUntil) { m.hold = db; m.holdUntil = now + HOLD_MS; }
+  if (pk >= 0.999) m.clipped = true;                // latches until you click it
+  return m;
+}
+
+function readMeters() {
+  const now = performance.now();
+  for (const tr of project ? project.tracks : []) readMeter(tr.id, buses[tr.id], now);
+  readMeter("master", master, now);
+}
+
+function silenceMeters() {
+  for (const m of Object.values(meters)) { m.peak = -Infinity; m.hold = -Infinity; }
+}
+
+// dB -> 0..1 up the bar
+const meterFrac = (db) => Math.max(0, Math.min(1, (db - METER_FLOOR) / -METER_FLOOR));
+const meterColor = (db) => db >= -3 ? "#ff6b6b" : db >= -12 ? "#ffd43b" : "#3ddc84";
+
+function drawMeter(g, x, y, w, h, m, vertical = true) {
+  g.fillStyle = "#101318";
+  g.fillRect(x, y, w, h);
+  const f = meterFrac(m.peak);
+  if (f > 0) {
+    g.fillStyle = meterColor(m.peak);
+    if (vertical) g.fillRect(x, y + h * (1 - f), w, h * f);
+    else g.fillRect(x, y, w * f, h);
+  }
+  if (isFinite(m.hold) && m.hold > METER_FLOOR) {          // the recent loudest, held
+    const hf = meterFrac(m.hold);
+    g.fillStyle = meterColor(m.hold);
+    if (vertical) g.fillRect(x, y + h * (1 - hf) - 1, w, 2);
+    else g.fillRect(x + w * hf - 2, y, 2, h);
+  }
+  if (m.clipped) {                                          // click it to clear
+    g.fillStyle = "#ff3b3b";
+    if (vertical) g.fillRect(x, y, w, 3); else g.fillRect(x + w - 3, y, 3, h);
+  }
+}
+
+// Click the master meter: set the fader, or have mixr measure the mix and
+// set it for you. Peak is measured by rendering the project offline through
+// the very same graph playback uses, so the number is the real one.
+async function masterMenu(px, py) {
+  const cur = project.master_db || 0;
+  openMenu(px, py, [
+    { slider: true, label: "Master", min: -24, max: 12, step: 0.5, value: cur,
+      fmt: v => (v > 0 ? "+" : "") + v.toFixed(1) + " dB",
+      oninput: (v) => { pendingMaster = v; } },
+    { sep: true },
+    { label: "Fit to −1 dBFS (measure the mix)", run: fitMaster },
+    { label: "Reset to 0 dB", disabled: cur === 0, run: () => setMaster(0) },
+    { sep: true },
+    { label: "Clear clip warnings", run: () => { for (const m of Object.values(meters)) m.clipped = false; render(); } },
+  ], "Master level");
+}
+
+let pendingMaster = null;
+window.addEventListener("mouseup", async () => {
+  if (pendingMaster === null) return;
+  const v = pendingMaster; pendingMaster = null;
+  await setMaster(v);
+});
+
+async function setMaster(db) {
+  project = await post("/api/project/master", { db });
+  if (master) master.gain.gain.value = Math.pow(10, (project.master_db || 0) / 20);
+  render();
+  setStatus(`master ${project.master_db > 0 ? "+" : ""}${project.master_db.toFixed(1)} dB`);
+}
+
+async function fitMaster() {
+  if (!project.tracks.some(t => t.clips.length)) return;
+  setStatus("measuring the mix…");
+  const end = Math.max(...project.tracks.flatMap(t => t.clips.map(clipEnd)), 1);
+  const buf = await previewOffline(end + 0.2);
+  let pk = 0;
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > pk) pk = v; }
+  }
+  if (pk <= 0) { setStatus("silence — nothing to measure"); return; }
+  const current = project.master_db || 0;
+  const target = current + (-1 - 20 * Math.log10(pk));      // peak -> -1 dBFS
+  await setMaster(Math.max(-24, Math.min(12, target)));
+  setStatus(`mix peaked at ${(20 * Math.log10(pk)).toFixed(1)} dBFS → master ${project.master_db.toFixed(1)} dB`);
+}
+
+function drawMasterMeter() {
+  const cv = $("mastermeter");
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawMeter(g, 0, 0, w, h, meterOf("master"), false);
+}
+
 function tick() {
   if (!playing) return;
+  readMeters();
   followPlayhead();
   render();
   requestAnimationFrame(tick);
@@ -622,6 +782,7 @@ function hit(mx, my) {
     }
     if (my >= y + 58 && my <= y + 72 && mx >= 10 && mx <= 170)
       return { kind: "volume", track: tr };
+    if (mx >= HEAD_W - 20) return { kind: "meter", track: tr };
     return { kind: "header", track: tr };
   }
   const t = scrollX + (mx - HEAD_W) / pxPerSec;
@@ -673,6 +834,11 @@ $("timeline").addEventListener("mousedown", async (e) => {
     const patch = h.kind === "mute" ? { mute: !h.track.mute } : { solo: !h.track.solo };
     project = await post(`/api/track/update?track=${h.track.id}`, patch);
     if (playing) { pause(); play(); }
+    render(); return;
+  }
+  if (h.kind === "meter") {                 // clear a latched clip warning
+    meterOf(h.track.id).clipped = false;
+    meterOf("master").clipped = false;
     render(); return;
   }
   if (h.kind === "volume") {
@@ -1145,7 +1311,8 @@ async function exportMix() {
     document.body.appendChild(a); a.click(); a.remove();
     sectionOpen.mixes = true;
     await loadBrowser();          // the new mix appears under Mixes
-    setStatus(`exported ${st.file} (${fmt(st.seconds)}) → saved under Mixes`);
+    const over = st.clipped ? `  ⚠ clipped ${st.clipped} samples — lower the master` : "";
+    setStatus(`exported ${st.file} (${fmt(st.seconds)}) peak ${st.peak_db} dBFS → saved under Mixes${over}`);
   } catch (e) {
     setStatus(`export failed: ${e.message}`);
   } finally {
@@ -1636,6 +1803,7 @@ $("bpm").onkeydown = (e) => {
   if (e.key === "Escape") { showBpm(); e.target.blur(); }
 };
 $("bpm").onchange = (e) => applyBpm(e.target.value);
+$("mastermeter").onclick = (e) => masterMenu(e.clientX, e.clientY);
 $("undo").onclick = doUndo;
 $("redo").onclick = doRedo;
 $("save").onclick = () => saveProject();

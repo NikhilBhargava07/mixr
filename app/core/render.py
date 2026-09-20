@@ -8,6 +8,7 @@ mirrors the Web Audio graph in app.js:
 The difference is that playback schedules nodes in real time, while this walks
 every clip once and sums into one big array. Same maths, different plumbing.
 """
+import math
 import threading
 import uuid
 from pathlib import Path
@@ -80,7 +81,7 @@ def _read_clip(path, into: float, length: float, sr: int):
     return y if y.shape[0] == 2 else np.repeat(y[:1], 2, axis=0)
 
 
-def render_project(project, resolve, sr: int = 44100, normalize: bool = True,
+def render_project(project, resolve, sr: int = 44100, normalize: bool = False,
                    progress=None) -> np.ndarray:
     """resolve(source, file) -> Path, injected so this module doesn't need to
     know about the server's folder layout."""
@@ -118,10 +119,17 @@ def render_project(project, resolve, sr: int = 44100, normalize: bool = True,
             if progress:
                 progress(done / total)
 
+    mix *= 10 ** (getattr(project, "master_db", 0.0) / 20)      # the master fader
+
+    # Normalising here USED to be automatic, and it silently broke the rule the
+    # rest of mixr keeps: a hot mix got quietly pulled down on export while the
+    # browser played it clipping, so export and preview could differ by 8 dB.
+    # Now the export clips exactly where playback does, the meters show it, and
+    # the master fader is the user's to set.
     if normalize:
         peak = float(np.max(np.abs(mix)))
         if peak > 1.0:
-            mix *= 0.98 / peak                   # only pull down if clipping
+            mix *= 0.98 / peak
     return mix
 
 
@@ -137,6 +145,9 @@ def start(project, resolve, name: str, fmt: str = "wav") -> str:
                 with _lock:
                     _jobs[job]["progress"] = round(p, 3)
             mix = render_project(project, resolve, progress=prog)
+            peak = float(np.max(np.abs(mix)))
+            clipped = int(np.sum(np.abs(mix) >= 1.0))
+            np.clip(mix, -1.0, 1.0, out=mix)        # same ceiling the browser has
             safe = "".join(ch for ch in name if ch.isalnum() or ch in " -_").strip() or "mixr"
             path = OUT / f"{safe}.wav"
             sf.write(path, mix.T, 44100, subtype="PCM_16")
@@ -148,7 +159,9 @@ def start(project, resolve, name: str, fmt: str = "wav") -> str:
                 path = m4a
             with _lock:
                 _jobs[job] = {"state": "done", "progress": 1.0,
-                              "file": path.name, "seconds": mix.shape[1] / 44100}
+                              "file": path.name, "seconds": mix.shape[1] / 44100,
+                              "peak_db": round(20 * math.log10(peak), 2) if peak > 0 else None,
+                              "clipped": clipped}
         except Exception as e:
             with _lock:
                 _jobs[job] = {"state": "error", "error": str(e)}

@@ -38,7 +38,8 @@ analysis learned to *suggest* arrangements, not just host them.
 | **Stems** | 4-way source separation (Demucs) from the clip menu |
 | **Session** | undo/redo (batched: pasting six clips is one step), save/open projects, autosave restored on restart |
 | **Editing** | multi-select, group drag, copy/cut/paste at the playhead, duplicate, nudge by a bar |
-| **Export** | render to WAV |
+| **Export** | render to WAV, reporting the peak level and any clipping |
+| **Metering** | peak meters per track and on the master, with peak-hold and clip warnings; a master fader with "fit to −1 dBFS" |
 
 ## What's missing
 

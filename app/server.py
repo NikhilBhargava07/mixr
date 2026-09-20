@@ -317,6 +317,14 @@ def set_tempo(bpm: float = Body(...), downbeats: list[float] = Body(default=[]),
     return p.to_dict()
 
 
+@app.post("/api/project/master")
+def set_master(db: float = Body(..., embed=True)):
+    snapshot("master", coalesce=True)
+    p = STATE["current"]
+    p.master_db = max(-24.0, min(12.0, float(db)))
+    return p.to_dict()
+
+
 @app.post("/api/project/retempo")
 def retempo(bpm: float = Body(..., embed=True)):
     """Change the project tempo and carry every warped clip with it."""

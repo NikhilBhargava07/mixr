@@ -19,6 +19,8 @@ just refresh the page.
 - drag the blue bar under M/S to change track volume
 - type a tempo in the **BPM** box — warped clips follow it, keeping their
   place in the bar (the clip label shows the resulting speed, e.g. 80.0%)
+- each track header has a **level meter**; the bar in the toolbar is the master
+  (click it to set the master fader, or let mixr fit the mix to −1 dBFS)
 - **+ / −** zoom the timeline
 - scroll sideways with a trackpad swipe, **shift + scroll wheel**, or the scrollbar under the tracks
 - **Home** jumps back to the start; **End** to the end
