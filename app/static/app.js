@@ -75,6 +75,20 @@ function setScroll(s) {
   scrollX = Math.max(0, Math.min(maxScroll(), s));
 }
 
+// The tracks scroll vertically inside #stage. macOS draws no scrollbar for
+// that, so this is one we can actually see and grab.
+function updateVScroll() {
+  const st = $("stage"), bar = $("vscroll"), thumb = $("vthumb");
+  if (!st || !bar || !thumb) return;
+  const ratio = st.clientHeight / st.scrollHeight;
+  if (ratio >= 1) { bar.style.visibility = "hidden"; return; }
+  bar.style.visibility = "visible";
+  const h = Math.max(30, bar.clientHeight * ratio);
+  const top = (st.scrollTop / (st.scrollHeight - st.clientHeight)) * (bar.clientHeight - h);
+  thumb.style.height = h + "px";
+  thumb.style.top = top + "px";
+}
+
 function updateScrollbar() {
   const bar = $("hscroll"), thumb = $("hthumb");
   if (!bar || !thumb) return;
@@ -376,6 +390,7 @@ function render() {
   if (px >= HEAD_W) drawPlayhead(g, px, H, W);
   $("time").textContent = fmt(t);
   updateScrollbar();
+  updateVScroll();
   showBpm();
   drawMasterMeter();
 }
@@ -898,10 +913,10 @@ $("timeline").addEventListener("mousemove", (e) => {
   $("timeline").style.cursor = (e.clientY - r.top) < RULER_H ? "ew-resize" : "default";
 });
 
-window.addEventListener("mousemove", (e) => {
+function dragMoveTo(clientX) {
   if (!drag) return;
   const r = $("timeline").getBoundingClientRect();
-  const mx = e.clientX - r.left;
+  const mx = clientX - r.left;
   const t = scrollX + (mx - HEAD_W) / pxPerSec;
 
   // TOUCH POINT 2 of 3 — while dragging the playhead, just move the marker.
@@ -932,9 +947,51 @@ window.addEventListener("mousemove", (e) => {
     fadeDrag(drag, t);
     render();
   }
+}
+
+/* ================================================================
+   EDGE SCROLLING
+   Drag anything — the playhead, a clip, a trim handle — past the edge of the
+   lanes and the view follows, the faster the further out you go. Without it a
+   drag just stops dead at the edge and you have to let go, scroll, start over.
+   ================================================================ */
+let edge = null;                 // {clientX, raf}
+
+function edgeSpeed(clientX) {
+  const cv = $("timeline"), r = cv.getBoundingClientRect();
+  const mx = clientX - r.left, zone = 60;
+  const left = HEAD_W, right = cv.clientWidth;
+  let past = 0;
+  if (mx < left + zone) past = mx - (left + zone);        // negative: scroll left
+  else if (mx > right - zone) past = mx - (right - zone); // positive: scroll right
+  if (!past) return 0;
+  // up to ~1.2 screens per second once you're a full zone past the edge
+  const frac = Math.max(-3, Math.min(3, past / zone));
+  return frac * viewSeconds() * 0.02;
+}
+
+function edgeTick() {
+  if (!drag || !edge) { edge = null; return; }
+  const v = edgeSpeed(edge.clientX);
+  if (v) {
+    const before = scrollX;
+    setScroll(scrollX + v);
+    if (scrollX !== before) { dragMoveTo(edge.clientX); render(); }
+  }
+  edge.raf = requestAnimationFrame(edgeTick);
+}
+
+window.addEventListener("mousemove", (e) => {
+  if (!drag) { if (edge) { cancelAnimationFrame(edge.raf); edge = null; } return; }
+  dragMoveTo(e.clientX);
+  if (edgeSpeed(e.clientX)) {
+    if (!edge) { edge = { clientX: e.clientX }; edge.raf = requestAnimationFrame(edgeTick); }
+    else edge.clientX = e.clientX;
+  } else if (edge) { cancelAnimationFrame(edge.raf); edge = null; }
 });
 
 window.addEventListener("mouseup", async () => {
+  if (edge) { cancelAnimationFrame(edge.raf); edge = null; }
   if (!drag) return;
 
   // TOUCH POINT 3 of 3 — a playhead drag has no clip to save, so handle it
@@ -1848,6 +1905,31 @@ $("timeline").addEventListener("wheel", (e) => {
   }
 }, { passive: false });
 window.onresize = render;
+
+// Vertical: drag the thumb, or click the bar to jump there.
+(() => {
+  const st = $("stage"), bar = $("vscroll"), thumb = $("vthumb");
+  let grab = null;
+  const range = () => st.scrollHeight - st.clientHeight;
+  thumb.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    grab = { y: e.clientY, top: st.scrollTop };
+    thumb.classList.add("drag");
+  });
+  bar.addEventListener("mousedown", (e) => {
+    if (e.target === thumb) return;
+    const r = bar.getBoundingClientRect();
+    st.scrollTop = ((e.clientY - r.top) / r.height) * range();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!grab) return;
+    const usable = bar.clientHeight - thumb.clientHeight;
+    st.scrollTop = grab.top + ((e.clientY - grab.y) / Math.max(1, usable)) * range();
+  });
+  window.addEventListener("mouseup", () => { grab = null; thumb.classList.remove("drag"); });
+  st.addEventListener("scroll", updateVScroll);
+  window.addEventListener("resize", updateVScroll);
+})();
 
 // Drag the thumb to scroll; click the bar to jump the view there.
 (() => {

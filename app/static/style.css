@@ -14,8 +14,21 @@ header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;
 header h1{margin:0;font-size:17px;letter-spacing:.5px}
 .transport{display:flex;align-items:center;gap:10px}
 .mono{font-variant-numeric:tabular-nums;color:var(--muted);min-width:44px}
-main{display:grid;grid-template-columns:260px 1fr;height:calc(100vh - 53px)}
+main{display:grid;grid-template-columns:260px 1fr 14px;height:calc(100vh - 53px)}
 #browser{border-right:1px solid var(--line);overflow:auto;padding:10px}
+
+/* macOS overlay scrollbars ignore these rules entirely (measured: they reserve
+   no width and stay invisible), which is why the timeline has scrollbars of its
+   own — #hscroll and #vscroll. These still help the file list on other
+   platforms. */
+#browser,#stage{scrollbar-gutter:stable}
+#browser::-webkit-scrollbar,#stage::-webkit-scrollbar{width:12px;height:12px}
+#browser::-webkit-scrollbar-track,#stage::-webkit-scrollbar-track{background:#171a21}
+#browser::-webkit-scrollbar-thumb,#stage::-webkit-scrollbar-thumb{
+  background:#4a5263;border:3px solid #171a21;border-radius:7px;min-height:28px}
+#browser::-webkit-scrollbar-thumb:hover,#stage::-webkit-scrollbar-thumb:hover{background:#6b7486}
+/* Firefox */
+#browser,#stage{scrollbar-width:thin;scrollbar-color:#4a5263 #171a21}
 .section{margin-bottom:6px}
 .sechead{display:flex;align-items:center;gap:7px;padding:7px 8px;cursor:pointer;
   border-radius:6px;user-select:none}
@@ -42,8 +55,16 @@ main{display:grid;grid-template-columns:260px 1fr;height:calc(100vh - 53px)}
 #stage{overflow:auto;padding:0;overscroll-behavior:contain}
 canvas{display:block;width:100%;cursor:default}
 /* horizontal scrollbar under the lanes; starts where the lanes start (HEAD_W) */
-#hscroll{position:relative;height:12px;margin:4px 10px 0 190px;border-radius:6px;
-  background:#1b1f27;cursor:pointer;user-select:none}
+/* sticky: the timeline scrollbar stays at the bottom of the lane area instead
+   of scrolling out of sight when you move down the track list */
+#vscroll{position:relative;background:#171a21;border-left:1px solid var(--line)}
+#vthumb{position:absolute;left:2px;right:2px;min-height:30px;border-radius:5px;
+  background:#4a5263;cursor:grab}
+#vthumb:hover,#vthumb.drag{background:#6b7486}
+#vthumb.drag{cursor:grabbing}
+#hscroll{position:sticky;bottom:0;z-index:2;height:14px;margin:4px 10px 0 190px;
+  border-radius:6px;background:#1b1f27;cursor:pointer;user-select:none;
+  box-shadow:0 -6px 10px -6px #14161a}
 #hthumb{position:absolute;top:2px;bottom:2px;min-width:24px;border-radius:4px;
   background:#4a5263;cursor:grab}
 #hthumb:hover,#hthumb.drag{background:#6b7486}
