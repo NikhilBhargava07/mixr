@@ -25,7 +25,14 @@ MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.
 
 
 def _key(path: Path) -> str:
-    """Cache key: path + mtime + size, so edits invalidate automatically."""
+    """Cache key: path + mtime + size, so edits invalidate automatically.
+
+    The path is resolved first. Hashing it as written meant the same file had
+    two identities — "library/audio/x.mp3" and the absolute path hashed
+    differently — so work cached under one was invisible to the other, and
+    Demucs would happily run twice on the same song.
+    """
+    path = Path(path).resolve()
     st = path.stat()
     return hashlib.sha1(f"{path}:{st.st_mtime_ns}:{st.st_size}".encode()).hexdigest()[:16]
 
