@@ -353,6 +353,10 @@ function render() {
     g.fillStyle = tr.color;  g.fillRect(10, y + 62, 160 * Math.min(1, tr.volume), 6);
     // level meter, down the right edge of the header
     drawMeter(g, HEAD_W - 16, y + 10, 9, TRACK_H - 24, meterOf(tr.id));
+    // ...and something visible to click for the track's options, since a
+    // right-click menu is invisible until you happen to try it
+    g.fillStyle = "#6b7486"; g.font = "600 14px system-ui";
+    g.fillText("⋯", HEAD_W - 38, y + 22);
 
     // clips — confined to the lane, so a clip scrolled partly off the left
     // edge can't paint over the track header (names, M/S, volume)
@@ -797,6 +801,8 @@ function hit(mx, my) {
     }
     if (my >= y + 58 && my <= y + 72 && mx >= 10 && mx <= 170)
       return { kind: "volume", track: tr };
+    if (mx >= HEAD_W - 44 && mx <= HEAD_W - 24 && my - y < 30)
+      return { kind: "menu", track: tr };
     if (mx >= HEAD_W - 20) return { kind: "meter", track: tr };
     return { kind: "header", track: tr };
   }
@@ -850,6 +856,13 @@ $("timeline").addEventListener("mousedown", async (e) => {
     project = await post(`/api/track/update?track=${h.track.id}`, patch);
     if (playing) { pause(); play(); }
     render(); return;
+  }
+  if (h.kind === "menu") {
+    // the window-level mousedown closes any open menu; without stopping this
+    // event there, the menu we're about to open closes in the same click
+    e.stopPropagation();
+    trackMenu(h.track, e.clientX, e.clientY);
+    return;
   }
   if (h.kind === "meter") {                 // clear a latched clip warning
     meterOf(h.track.id).clipped = false;
@@ -1664,6 +1677,9 @@ function clipMenu(tr, c, px, py) {
           start: c.start + c.length, offset: c.offset, length: c.length,
           ...warpOf(c) });
         project = r.project; render(); } },
+    { sep: true },
+    { label: stemJobs.has(tr.id) ? "Separating…" : "Separate track into stems",
+      disabled: stemJobs.has(tr.id), run: () => separateStems(tr) },
     { sep: true },
     { label: "Match project tempo", run: () => matchProjectTempo(tr, c) },
     { label: "Warp every bar to grid", run: () => warpToGrid(tr, c) },
