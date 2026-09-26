@@ -77,6 +77,9 @@ class Track:
     color: str = "#4da3ff"
     clips: list[Clip] = field(default_factory=list)
     effects: list[Effect] = field(default_factory=list)
+    # When frozen, the clips below are a single bounced file and this holds
+    # what was here before, so unfreezing puts it back exactly.
+    frozen: dict | None = None
 
     def add_clip(self, **kw) -> Clip:
         c = Clip(**kw)
@@ -110,6 +113,12 @@ class Project:
     downbeats: list[float] = field(default_factory=list)
     key: str = ""             # e.g. "F# minor" — the key clips get matched to
     master_db: float = 0.0    # master fader, dB — applied in preview AND export
+    # Loop and markers are navigation, not sound: they shape playback and the
+    # ruler, and never reach the render.
+    loop_on: bool = False
+    loop_start: float = 0.0
+    loop_end: float = 0.0
+    markers: list = field(default_factory=list)   # [{id, time, name}]
     sample_rate: int = 44100
     tracks: list[Track] = field(default_factory=list)
 
@@ -180,9 +189,14 @@ class Project:
         p = cls(id=d.get("id", _id()), name=d.get("name", "Untitled"),
                 bpm=d.get("bpm", 100.0), downbeats=d.get("downbeats", []),
                 key=d.get("key", ""), master_db=float(d.get("master_db", 0.0)),
+                loop_on=bool(d.get("loop_on", False)),
+                loop_start=float(d.get("loop_start", 0.0)),
+                loop_end=float(d.get("loop_end", 0.0)),
+                markers=list(d.get("markers", [])),
                 sample_rate=d.get("sample_rate", 44100))
         for td in d.get("tracks", []):
             t = Track(**{k: v for k, v in td.items() if k not in ("clips", "effects")})
+            t.frozen = td.get("frozen")
             t.clips = [Clip(**_migrate_clip(cd)) for cd in td.get("clips", [])]
             t.effects = [Effect(**ed) for ed in td.get("effects", [])]
             p.tracks.append(t)

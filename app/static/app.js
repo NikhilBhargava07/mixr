@@ -331,6 +331,31 @@ function render() {
     g.fillText(fmt(s), x(s) + 3, 25);
   }
 
+  // ---- loop brace
+  if (project.loop_end > project.loop_start) {
+    const a = Math.max(HEAD_W, x(project.loop_start)), b = x(project.loop_end);
+    if (b > HEAD_W) {
+      g.fillStyle = project.loop_on ? "rgba(77,163,255,.16)" : "rgba(140,150,170,.08)";
+      g.fillRect(a, 0, b - a, H);
+      g.fillStyle = project.loop_on ? "#4da3ff" : "#6b7486";
+      g.fillRect(a, 0, Math.max(2, Math.min(3, b - a)), RULER_H);
+      g.fillRect(b - 3, 0, 3, RULER_H);
+    }
+  }
+
+  // ---- markers
+  for (const m of project.markers || []) {
+    const px = x(m.time);
+    if (px < HEAD_W - 2 || px > W) continue;
+    g.fillStyle = "#ffd666";
+    g.beginPath();
+    g.moveTo(px, RULER_H - 12); g.lineTo(px + 7, RULER_H - 8);
+    g.lineTo(px, RULER_H - 4); g.closePath(); g.fill();
+    g.fillRect(px - 1, RULER_H - 12, 1.5, H);
+    g.fillStyle = "#ffd666"; g.font = "10px system-ui";
+    g.fillText(m.name.slice(0, 18), px + 10, RULER_H - 4);
+  }
+
   // ---- tracks
   project.tracks.forEach((tr, i) => {
     const y = RULER_H + i * TRACK_H;
@@ -341,6 +366,12 @@ function render() {
 
     // header
     g.fillStyle = "#15181d"; g.fillRect(0, y, HEAD_W, TRACK_H);
+    if (drag && drag.mode === "track") {
+      if (drag.track === tr) { g.fillStyle = "rgba(77,163,255,.10)"; g.fillRect(0, y, W, TRACK_H); }
+      if (drag.to === i) {                          // where it will land
+        g.fillStyle = "#4da3ff"; g.fillRect(0, y + (drag.to > drag.from ? TRACK_H - 3 : 0), HEAD_W, 3);
+      }
+    }
     g.fillStyle = tr.mute ? "#5c6373" : "#e6e9ef";
     g.font = "600 12px system-ui";
     g.fillText(tr.name.slice(0, 22), 10, y + 20);
@@ -396,6 +427,7 @@ function render() {
   updateScrollbar();
   updateVScroll();
   showBpm();
+  if ($("loop").checked !== !!project.loop_on) $("loop").checked = !!project.loop_on;
   drawMasterMeter();
 }
 
@@ -497,9 +529,48 @@ function drawClipWave(g, wf, c, cx, cw, y, h, color) {
 }
 
 // ---------------------------------------------------------------- playback
+// While a count-in is ticking, playStart is in the future: the playhead waits
+// at the start instead of running backwards.
 function currentTime() {
   if (!playing) return playOffset;
-  return playOffset + (actx.currentTime - playStart);
+  return Math.max(playOffset, playOffset + (actx.currentTime - playStart));
+}
+
+const loopOn = () => project && project.loop_on && project.loop_end > project.loop_start;
+
+/* ================================================================
+   THE CLICK
+   A synthesised tick on every beat, louder on the bar. Preview only — it is
+   never part of a render, so it can't end up in an export by accident.
+   ================================================================ */
+function clickBuffer(ctx, accent) {
+  const n = Math.floor(ctx.sampleRate * 0.03);
+  const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  const f = accent ? 1600 : 1000;
+  for (let i = 0; i < n; i++) {
+    d[i] = Math.sin(2 * Math.PI * f * i / ctx.sampleRate) * Math.exp(-i / (ctx.sampleRate * 0.008));
+  }
+  return buf;
+}
+
+function scheduleClicks(ctx, from, until, startTime, dest) {
+  if (!$("click").checked || !project.bpm) return [];
+  const beat = 60 / project.bpm, out = [];
+  const hi = clickBuffer(ctx, true), lo = clickBuffer(ctx, false);
+  let i = Math.max(0, Math.floor(from / beat));
+  for (; i * beat <= until; i++) {
+    const at = startTime + (i * beat - from);
+    if (at < ctx.currentTime - 0.01) continue;
+    const src = ctx.createBufferSource();
+    src.buffer = i % 4 === 0 ? hi : lo;
+    const g = ctx.createGain(); g.gain.value = 0.35;
+    src.connect(g).connect(dest);
+    src.start(at);
+    src.onended = () => { const i = liveNodes.indexOf(src); if (i >= 0) liveNodes.splice(i, 1); };
+    out.push(src);
+  }
+  return out;
 }
 
 // Build and start one clip's nodes: source -> gain (with fades) -> pan -> out.
@@ -553,6 +624,8 @@ function scheduleClip(ctx, out, tr, c, t0, startTime) {
     gain.gain.linearRampToValueAtTime(0, at + dur);
   }
   src.start(at, into, dur);
+  // let go of finished nodes, or a long loop accumulates thousands of them
+  src.onended = () => { const i = liveNodes.indexOf(src); if (i >= 0) liveNodes.splice(i, 1); };
   return src;
 }
 
@@ -594,7 +667,10 @@ async function play() {
   finally { starting = false; }
   if (pending) setStatus("ready");
 
-  playStart = actx.currentTime;
+  // A count-in delays the music by a bar while the click ticks it in.
+  const bar = 240 / (project.bpm || 100);
+  const countIn = ($("countin").checked && $("click").checked) ? bar : 0;
+  playStart = actx.currentTime + 0.05 + countIn;
   playing = true;
   liveNodes = [];
 
@@ -611,6 +687,20 @@ async function play() {
     const src = scheduleClip(actx, buses[tr.id].gain, tr, c, t0, playStart);
     if (src) liveNodes.push(src);
   }
+  if (countIn) {                                   // the count-in bar itself
+    const beat = 60 / (project.bpm || 100);
+    for (let i = 0; i < 4; i++) {
+      const src = actx.createBufferSource();
+      src.buffer = clickBuffer(actx, i === 0);
+      const g = actx.createGain(); g.gain.value = 0.35;
+      src.connect(g).connect(actx.destination);
+      src.start(playStart - countIn + i * beat);
+      liveNodes.push(src);
+    }
+  }
+  const horizon = loopOn() ? project.loop_end : t0 + 600;
+  liveNodes.push(...scheduleClicks(actx, t0, horizon, playStart, actx.destination));
+  loopPass = { at: playStart, from: t0, scheduled: false };
   $("play").textContent = "Pause";
   tick();
 }
@@ -779,8 +869,40 @@ function drawMasterMeter() {
   drawMeter(g, 0, 0, w, h, meterOf("master"), false);
 }
 
+// Looping without a gap: a quarter second before the loop ends, schedule the
+// next pass to begin exactly at the loop point. Tearing the nodes down and
+// rebuilding them at the boundary (the way a seek does) would click.
+let loopPass = null;
+
+function serviceLoop() {
+  if (!loopOn() || !loopPass || !actx) return;
+  const t = currentTime();
+  const remaining = project.loop_end - t;
+  if (!loopPass.scheduled && remaining < 0.25 && remaining > -1) {
+    const at = actx.currentTime + remaining;
+    const soloed = project.tracks.some(x => x.solo);
+    for (const tr of project.tracks) {
+      if (tr.mute || (soloed && !tr.solo) || !buses[tr.id]) continue;
+      for (const c of tr.clips) {
+        if (c.start + c.length <= project.loop_start || c.start >= project.loop_end) continue;
+        const src = scheduleClip(actx, buses[tr.id].gain, tr, c, project.loop_start, at);
+        if (src) liveNodes.push(src);
+      }
+    }
+    liveNodes.push(...scheduleClicks(actx, project.loop_start, project.loop_end, at, actx.destination));
+    loopPass.scheduled = true;       // exactly once per pass, or the passes stack
+    loopPass.nextAt = at;
+  }
+  if (t >= project.loop_end && loopPass.nextAt) {  // the new pass is already sounding
+    playOffset = project.loop_start;
+    playStart = loopPass.nextAt;
+    loopPass = { at: loopPass.nextAt, from: project.loop_start, scheduled: false };
+  }
+}
+
 function tick() {
   if (!playing) return;
+  serviceLoop();
   readMeters();
   followPlayhead();
   render();
@@ -788,6 +910,8 @@ function tick() {
 }
 
 // ---------------------------------------------------------------- hit test
+const x0 = (t) => HEAD_W + (t - scrollX) * pxPerSec;   // time -> canvas x
+
 function hit(mx, my) {
   if (!project) return null;
   const i = Math.floor((my - RULER_H) / TRACK_H);
@@ -842,6 +966,20 @@ $("timeline").addEventListener("mousedown", async (e) => {
   const r = e.target.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
   if (my < RULER_H) {
+    const t = scrollX + (mx - HEAD_W) / pxPerSec;
+    const hitMarker = (project.markers || []).find(
+      m => Math.abs(x0(m.time) - mx) < 8 && my < RULER_H);
+    if (hitMarker && !e.shiftKey) {
+      if (e.altKey) { post(`/api/marker/remove?id=${hitMarker.id}`).then(p2 => { project = p2; render(); }); return; }
+      drag = { mode: "marker", id: hitMarker.id };
+      return;
+    }
+    if (e.shiftKey) {                              // shift-drag sets the loop
+      drag = { mode: "loop", from: snap(Math.max(0, t)) };
+      project.loop_start = project.loop_end = drag.from;
+      project.loop_on = true;
+      render(); return;
+    }
     // TOUCH POINT 1 of 3 — begin a playhead drag.
     // Remember whether we were playing so mouseup can resume, then stop audio
     // for the duration of the drag (re-seeking every frame would stutter).
@@ -855,6 +993,10 @@ $("timeline").addEventListener("mousedown", async (e) => {
     const patch = h.kind === "mute" ? { mute: !h.track.mute } : { solo: !h.track.solo };
     project = await post(`/api/track/update?track=${h.track.id}`, patch);
     if (playing) { pause(); play(); }
+    render(); return;
+  }
+  if (h.kind === "header") {
+    drag = { mode: "track", track: h.track, from: project.tracks.indexOf(h.track), to: null };
     render(); return;
   }
   if (h.kind === "menu") {
@@ -932,6 +1074,24 @@ function dragMoveTo(clientX) {
   const mx = clientX - r.left;
   const t = scrollX + (mx - HEAD_W) / pxPerSec;
 
+  if (drag.mode === "track") {
+    const my = (window.__dragY || 0) - $("timeline").getBoundingClientRect().top;
+    drag.to = Math.max(0, Math.min(project.tracks.length - 1,
+                                   Math.floor((my - RULER_H) / TRACK_H)));
+    render(); return;
+  }
+  if (drag.mode === "loop") {
+    const to = snap(Math.max(0, t));
+    project.loop_start = Math.min(drag.from, to);
+    project.loop_end = Math.max(drag.from, to);
+    render(); return;
+  }
+  if (drag.mode === "marker") {
+    const m = project.markers.find(x => x.id === drag.id);
+    if (m) { m.time = Math.max(0, snap(t)); render(); }
+    return;
+  }
+
   // TOUCH POINT 2 of 3 — while dragging the playhead, just move the marker.
   if (drag.mode === "playhead") { playheadDragMove(t); return; }
 
@@ -996,6 +1156,7 @@ function edgeTick() {
 
 window.addEventListener("mousemove", (e) => {
   if (!drag) { if (edge) { cancelAnimationFrame(edge.raf); edge = null; } return; }
+  window.__dragY = e.clientY;                      // vertical drags need it too
   dragMoveTo(e.clientX);
   if (edgeSpeed(e.clientX)) {
     if (!edge) { edge = { clientX: e.clientX }; edge.raf = requestAnimationFrame(edgeTick); }
@@ -1010,6 +1171,30 @@ window.addEventListener("mouseup", async () => {
   // TOUCH POINT 3 of 3 — a playhead drag has no clip to save, so handle it
   // here and return BEFORE the clip-update code below (which would crash).
   if (drag.mode === "playhead") { await playheadDragEnd(); return; }
+
+  if (drag.mode === "track") {
+    const { track, from, to } = drag;
+    drag = null;
+    if (to !== null && to !== from) {
+      project = await post(`/api/track/reorder?track=${track.id}`, { to });
+      setStatus(`moved "${track.name}" to position ${to + 1}`);
+    }
+    render(); return;
+  }
+  if (drag.mode === "loop") {
+    const { loop_start, loop_end } = project;
+    drag = null;
+    project = await post("/api/project/loop", { start: loop_start, end: loop_end, on: true });
+    $("loop").checked = project.loop_on;
+    setStatus(`loop ${fmt(project.loop_start)} – ${fmt(project.loop_end)}`);
+    render(); return;
+  }
+  if (drag.mode === "marker") {
+    const m = project.markers.find(x => x.id === drag.id);
+    drag = null;
+    if (m) project = await post(`/api/marker/update?id=${m.id}`, { time: m.time });
+    render(); return;
+  }
 
   if (drag.mode === "warp-pin") {
     const { track, clip, before } = drag;
@@ -1448,6 +1633,37 @@ function openMenu(px, py, items, title) {
   m.style.top  = Math.min(py, window.innerHeight - r.height - 8) + "px";
 }
 
+// Right-click the ruler: markers and the loop.
+function rulerMenu(mx, px, py) {
+  const at = snap(Math.max(0, scrollX + (mx - HEAD_W) / pxPerSec));
+  const near = (project.markers || []).find(m => Math.abs(x0(m.time) - mx) < 10);
+  const items = [];
+  if (near) {
+    items.push({ text: true, label: "Name", value: near.name,
+      onenter: async (v) => { project = await post(`/api/marker/update?id=${near.id}`, { name: v }); render(); } });
+    items.push({ label: "Delete marker", danger: true, run: async () => {
+      project = await post(`/api/marker/remove?id=${near.id}`); render(); } });
+    items.push({ sep: true });
+  }
+  items.push({ label: `Add marker at ${fmt(at)}`, run: async () => {
+    project = await post("/api/marker/add", { time: at, name: "" }); render(); } });
+  items.push({ sep: true });
+  items.push({ label: "Loop the next 8 bars", run: async () => {
+    const bar = 240 / (project.bpm || 100);
+    project = await post("/api/project/loop", { start: at, end: at + bar * 8, on: true });
+    $("loop").checked = true; render(); } });
+  if (selection.length) items.push({ label: "Loop the selected clips", run: async () => {
+    const cs = selectedClips();
+    project = await post("/api/project/loop", {
+      start: Math.min(...cs.map(({ c }) => c.start)),
+      end: Math.max(...cs.map(({ c }) => clipEnd(c))), on: true });
+    $("loop").checked = true; render(); } });
+  if (project.loop_end > project.loop_start) items.push({ label: "Clear loop", run: async () => {
+    project = await post("/api/project/loop", { start: 0, end: 0, on: false });
+    $("loop").checked = false; render(); } });
+  openMenu(px, py, items, near ? `Marker · ${near.name}` : "Ruler");
+}
+
 function trackMenu(tr, px, py) {
   const busy = stemJobs.has(tr.id);
   openMenu(px, py, [
@@ -1473,6 +1689,16 @@ function trackMenu(tr, px, py) {
     { sep: true },
     { label: busy ? "Separating…" : "Separate into stems", disabled: busy || !tr.clips.length,
       run: () => separateStems(tr) },
+    { label: tr.frozen ? "Unfreeze (edit again)" : "Freeze (bounce to one clip)",
+      disabled: !tr.clips.length,
+      run: async () => {
+        setStatus(tr.frozen ? "unfreezing…" : "freezing…");
+        try {
+          project = await post(`/api/track/${tr.frozen ? "unfreeze" : "freeze"}?track=${tr.id}`);
+          render(); await ensureWaves(); render();
+          setStatus(tr.frozen ? `"${tr.name}" unfrozen` : `"${tr.name}" frozen to one clip`);
+        } catch (e) { setStatus(`freeze failed: ${e.message}`); }
+      } },
     { sep: true },
     { label: "Delete track", danger: true, run: async () => {
         project = await post(`/api/track/remove?track=${tr.id}`);
@@ -1508,6 +1734,25 @@ async function applyWarp(tr, c, warp) {
 //
 // The ratio is always computed from the ORIGINAL file's tempo, so running this
 // twice gives the same answer instead of compounding.
+// Normalize without touching audio: read the peak from the clip's waveform
+// and set the clip's gain so it lands just under full scale.
+async function normalizeClip(tr, c) {
+  try {
+    const wf = await getWave(c);
+    const base = wf.base || 0;
+    const n = wf.min.length;
+    const i0 = Math.max(0, Math.floor(((c.offset - base) / wf.duration) * n));
+    const i1 = Math.min(n, Math.ceil(((c.offset - base + c.length) / wf.duration) * n));
+    let pk = 0;
+    for (let i = i0; i < i1; i++) pk = Math.max(pk, Math.abs(wf.min[i]), Math.abs(wf.max[i]));
+    if (pk <= 0) { setStatus("that clip is silent"); return; }
+    const gain = Math.min(8, Math.pow(10, -0.3 / 20) / pk);
+    project = await post(`/api/clip/update?track=${tr.id}&clip=${c.id}`, { gain });
+    render();
+    setStatus(`${c.name}: peak ${(20 * Math.log10(pk)).toFixed(1)} dB → gain ${(20 * Math.log10(gain)).toFixed(1)} dB`);
+  } catch (e) { setStatus(`normalize failed: ${e.message}`); }
+}
+
 async function matchProjectTempo(tr, c) {
   const target = project.bpm;
   if (!target) { setStatus("the project has no tempo yet"); return; }
@@ -1677,6 +1922,26 @@ function clipMenu(tr, c, px, py) {
           start: c.start + c.length, offset: c.offset, length: c.length,
           ...warpOf(c) });
         project = r.project; render(); } },
+    { label: "Normalize (set gain from the peak)", run: () => normalizeClip(tr, c) },
+    { label: "Reverse", run: async () => {
+        setStatus("reversing…");
+        try {
+          project = await post(`/api/clip/reverse?track=${tr.id}&clip=${c.id}`);
+          render(); await ensureWaves(); render(); setStatus("reversed");
+        } catch (e) { setStatus(`reverse failed: ${e.message}`); }
+      } },
+    { label: `Consolidate ${selection.length > 1 ? selection.length + " clips" : "clip"} into one`,
+      disabled: selection.length > 1 && new Set(selectedClips().map(s => s.tr.id)).size > 1,
+      run: async () => {
+        const ids = selection.length > 1 ? selectedClips().filter(s => s.tr.id === tr.id).map(s => s.c.id) : [c.id];
+        setStatus("consolidating…");
+        try {
+          const r = await post("/api/clips/consolidate", { track: tr.id, clips: ids });
+          project = r.project; selectOnly(tr.id, r.clip);
+          render(); await ensureWaves(); render();
+          setStatus(`consolidated ${ids.length} clip${ids.length > 1 ? "s" : ""}`);
+        } catch (e) { setStatus(`consolidate failed: ${e.message}`); }
+      } },
     { sep: true },
     { label: stemJobs.has(tr.id) ? "Separating…" : "Separate track into stems",
       disabled: stemJobs.has(tr.id), run: () => separateStems(tr) },
@@ -1720,7 +1985,9 @@ $("timeline").addEventListener("dblclick", async (e) => {
 $("timeline").addEventListener("contextmenu", (e) => {
   e.preventDefault();
   const r = e.target.getBoundingClientRect();
-  const h = hit(e.clientX - r.left, e.clientY - r.top);
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (my < RULER_H) { rulerMenu(mx, e.clientX, e.clientY); return; }
+  const h = hit(mx, my);
   if (!h) { closeMenu(); return; }
   if (h.kind === "clip" || h.kind === "trim-left" || h.kind === "trim-right") {
     selected = { track: h.track.id, clip: h.clip.id };
@@ -1877,6 +2144,18 @@ $("bpm").onkeydown = (e) => {
 };
 $("bpm").onchange = (e) => applyBpm(e.target.value);
 $("mastermeter").onclick = (e) => masterMenu(e.clientX, e.clientY);
+$("loop").onchange = async (e) => {
+  if (e.target.checked && !(project.loop_end > project.loop_start)) {
+    // nothing set yet: loop the next 8 bars from the playhead
+    const bar = 240 / (project.bpm || 100), s = currentTime();
+    project = await post("/api/project/loop", { start: s, end: s + bar * 8, on: true });
+  } else {
+    project = await post("/api/project/loop",
+      { start: project.loop_start, end: project.loop_end, on: e.target.checked });
+  }
+  setStatus(project.loop_on ? `loop ${fmt(project.loop_start)} – ${fmt(project.loop_end)}` : "loop off");
+  render();
+};
 $("undo").onclick = doUndo;
 $("redo").onclick = doRedo;
 $("save").onclick = () => saveProject();

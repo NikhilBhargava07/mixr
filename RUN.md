@@ -24,6 +24,11 @@ just refresh the page.
 - **+ / −** zoom the timeline
 - scroll sideways with a trackpad swipe, **shift + scroll wheel**, or the scrollbar under the tracks
 - **Home** jumps back to the start; **End** to the end
+- **loop / click / count-in** toggles sit in the toolbar; shift-drag the ruler
+  to set the loop, or right-click the ruler for markers and loop presets
+- drag a track's name up or down to reorder it
+- track menu: **Freeze** bounces a track to one clip (and back again)
+- clip menu: **Normalize**, **Reverse**, **Consolidate**
 - select a clip and press Delete to remove it
 - shift-click to select several clips; ⌘A selects all, Esc clears
 - ⌘C / ⌘X / ⌘V copy, cut and paste at the playhead; ⌘D duplicates after the selection

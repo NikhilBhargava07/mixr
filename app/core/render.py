@@ -133,6 +133,45 @@ def render_project(project, resolve, sr: int = 44100, normalize: bool = False,
     return mix
 
 
+# ---------------------------------------------------------------- bounces
+# Freeze, consolidate and reverse all mean "turn this into a file and point the
+# clip at it". They go through here so a bounced clip is built the same way the
+# export builds one — which is what keeps preview == export true afterwards.
+BOUNCES = ROOT / "app" / "_bounces"
+BOUNCES.mkdir(parents=True, exist_ok=True)
+
+
+def render_clips(track, clips, resolve, sr: int = 44100, with_effects: bool = True):
+    """Clips as they sound on the timeline — warp, fades, clip gain, and
+    optionally the track's strip — but WITHOUT the track fader, pan or mute,
+    so those stay live after bouncing. Returns (audio, timeline start)."""
+    clips = sorted(clips, key=lambda c: c.start)
+    start = min(c.start for c in clips)
+    end = max(c.start + c.length for c in clips)
+    n = int(round((end - start) * sr))
+    out = np.zeros((2, n + sr), dtype=np.float32)        # +1s for fade tails
+    fx = track.effects if with_effects else []
+    for c in clips:
+        path, base = audio.clip_audio(resolve(c.source, c.file), c.warp, c.pitch,
+                                      c.warp_mode, c.offset, c.length, fx)
+        y = _read_clip(path, c.offset - base, c.length, sr)
+        m = y.shape[1]
+        y = y * _fade(m, c.fade_in, c.fade_out, sr) * c.gain
+        s = int(round((c.start - start) * sr))
+        e = min(out.shape[1], s + m)
+        if e > s:
+            out[:, s:e] += y[:, : e - s]
+    return out[:, :n], start
+
+
+def write_bounce(y, name: str, sr: int = 44100) -> str:
+    """Write a bounce and return its filename inside BOUNCES."""
+    safe = "".join(ch for ch in name if ch.isalnum() or ch in " -_").strip() or "bounce"
+    path = BOUNCES / f"{safe}-{uuid.uuid4().hex[:6]}.wav"
+    sf.write(path, y.T, sr, subtype="PCM_16")
+    return path.name
+
+
 def start(project, resolve, name: str, fmt: str = "wav") -> str:
     """Kick off a render on a background thread; returns a job id to poll."""
     job = uuid.uuid4().hex[:12]

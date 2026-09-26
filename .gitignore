@@ -39,3 +39,6 @@ library/Takeout/
 
 # --- private companion repo (mixr-research), cloned here
 research/
+
+# bounced audio (freeze, consolidate, reverse) — rebuildable from the project
+app/_bounces/

@@ -10,6 +10,8 @@ server URL is the whole migration.
 Run:  .venv/bin/uvicorn app.server:app --reload --port 8765
 """
 import sys
+import uuid
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Body, UploadFile, File
@@ -23,7 +25,7 @@ sys.path.insert(0, str(ROOT / "analysis"))
 sys.path.insert(0, str(ROOT / "engine"))
 
 from app.core import audio, stems, render, warp, fx      # noqa: E402
-from app.core.project import Project, Clip, Effect     # noqa: E402
+from app.core.project import Project, Clip, Effect, _migrate_clip  # noqa: E402
 
 app = FastAPI(title="mixr", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -50,6 +52,7 @@ SOURCES = {
     # internal: reachable by path (clips reference them) but not listed
     "stems":   ROOT / "app" / "_stems",
     "renders": ROOT / "renders",
+    "bounces": ROOT / "app" / "_bounces",
     "examples": ROOT / "example_mixes",
 }
 VISIBLE = ["mixes", "media"]
@@ -336,6 +339,139 @@ def retempo(bpm: float = Body(..., embed=True)):
         UNDO.pop()                                 # nothing changed; don't leave an empty undo step
         raise HTTPException(400, str(e))
     return {"ratio": r, "project": p.to_dict()}
+
+
+@app.post("/api/project/loop")
+def set_loop(start: float = Body(0.0), end: float = Body(0.0), on: bool = Body(True)):
+    """The loop brace. Playback only — it never reaches the render."""
+    p = STATE["current"]
+    p.loop_start, p.loop_end = max(0.0, min(start, end)), max(start, end)
+    p.loop_on = bool(on) and p.loop_end > p.loop_start
+    return p.to_dict()
+
+
+@app.post("/api/marker/add")
+def add_marker(time: float = Body(...), name: str = Body("")):
+    snapshot("marker.add")
+    p = STATE["current"]
+    p.markers.append({"id": uuid.uuid4().hex[:8], "time": float(time),
+                      "name": name or f"Marker {len(p.markers) + 1}"})
+    p.markers.sort(key=lambda m: m["time"])
+    return p.to_dict()
+
+
+@app.post("/api/marker/update")
+def update_marker(id: str, payload: dict = Body(...)):
+    snapshot(f"marker.update:{id}", coalesce=True)
+    p = STATE["current"]
+    for m in p.markers:
+        if m["id"] == id:
+            if "time" in payload:
+                m["time"] = max(0.0, float(payload["time"]))
+            if "name" in payload:
+                m["name"] = str(payload["name"])[:60]
+            p.markers.sort(key=lambda x: x["time"])
+            return p.to_dict()
+    raise HTTPException(404, "no such marker")
+
+
+@app.post("/api/marker/remove")
+def remove_marker(id: str):
+    snapshot("marker.remove")
+    p = STATE["current"]
+    p.markers = [m for m in p.markers if m["id"] != id]
+    return p.to_dict()
+
+
+@app.post("/api/track/reorder")
+def reorder_track(track: str, to: int = Body(..., embed=True)):
+    snapshot("track.reorder")
+    p = STATE["current"]
+    i = next((k for k, t in enumerate(p.tracks) if t.id == track), None)
+    if i is None:
+        raise HTTPException(404, "no such track")
+    t = p.tracks.pop(i)
+    p.tracks.insert(max(0, min(len(p.tracks), to)), t)
+    return p.to_dict()
+
+
+# ------------------------------------------------------------------ bounces
+@app.post("/api/track/freeze")
+def freeze_track(track: str):
+    """Render a track's clips (with its strip) to one file. The fader, pan and
+    mute stay live; unfreezing restores exactly what was here."""
+    snapshot("track.freeze")
+    p = STATE["current"]
+    t = p.track(track)
+    if not t:
+        raise HTTPException(404, "no such track")
+    if t.frozen:
+        raise HTTPException(400, "already frozen")
+    if not t.clips:
+        raise HTTPException(400, "nothing to freeze")
+    y, start = render.render_clips(t, t.clips, _resolve)
+    fn = render.write_bounce(y, f"{t.name}-frozen")
+    t.frozen = {"clips": [asdict(c) for c in t.clips],
+                "effects": [asdict(e) for e in t.effects]}
+    t.clips = [Clip(name=f"{t.name} (frozen)", source="bounces", file=fn,
+                    start=start, offset=0.0, length=y.shape[1] / 44100,
+                    fade_in=0.0, fade_out=0.0)]   # the fades are already in the file
+    t.effects = []
+    return p.to_dict()
+
+
+@app.post("/api/track/unfreeze")
+def unfreeze_track(track: str):
+    snapshot("track.unfreeze")
+    p = STATE["current"]
+    t = p.track(track)
+    if not t or not t.frozen:
+        raise HTTPException(400, "not frozen")
+    t.clips = [Clip(**_migrate_clip(c)) for c in t.frozen["clips"]]
+    t.effects = [Effect(**e) for e in t.frozen.get("effects", [])]
+    t.frozen = None
+    return p.to_dict()
+
+
+@app.post("/api/clips/consolidate")
+def consolidate_clips(payload: dict = Body(...)):
+    """Several clips on one track become one. The strip is NOT baked in, so it
+    still applies once, live."""
+    snapshot("clips.consolidate")
+    p = STATE["current"]
+    t = p.track(payload["track"])
+    if not t:
+        raise HTTPException(404, "no such track")
+    ids = set(payload.get("clips") or [])
+    picked = [c for c in t.clips if c.id in ids]
+    if len(picked) < 1:
+        raise HTTPException(400, "nothing to consolidate")
+    y, start = render.render_clips(t, picked, _resolve, with_effects=False)
+    fn = render.write_bounce(y, f"{t.name}-consolidated")
+    t.clips = [c for c in t.clips if c.id not in ids]
+    c = t.add_clip(name=f"{picked[0].name} +", source="bounces", file=fn,
+                   start=start, offset=0.0, length=y.shape[1] / 44100,
+                   fade_in=0.0, fade_out=0.0)     # already baked in
+    return {"clip": c.id, "project": p.to_dict()}
+
+
+@app.post("/api/clip/reverse")
+def reverse_clip(track: str, clip: str):
+    """Bake the clip's warped audio backwards. The strip stays live."""
+    snapshot("clip.reverse")
+    p = STATE["current"]
+    t = p.track(track)
+    c = t.clip(clip) if t else None
+    if not c:
+        raise HTTPException(404, "no such clip")
+    y, _ = render.render_clips(t, [c], _resolve, with_effects=False)
+    fn = render.write_bounce(y[:, ::-1].copy(), f"{c.name}-reversed")
+    c.source, c.file = "bounces", fn
+    c.offset, c.warp, c.pitch, c.warp_mode = 0.0, [], 0.0, "crisp"
+    c.length = y.shape[1] / 44100
+    c.fade_in = c.fade_out = 0.0                  # already baked in
+    c.name = f"{c.name} ←"
+    return p.to_dict()
 
 
 # ------------------------------------------------------------------ auto-warp
