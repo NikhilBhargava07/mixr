@@ -12,6 +12,13 @@
     <string>--host</string><string>127.0.0.1</string>
   </array>
   <!-- start at login, and bring it back if it ever dies -->
+  <!-- launchd's default PATH has no Homebrew, and mixr shells out to
+       rubberband. The code also resolves it itself, so this is belt and braces. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>RunAtLoad</key>          <true/>
   <key>KeepAlive</key>          <true/>
   <key>StandardOutPath</key>    <string>/tmp/mixr.log</string>

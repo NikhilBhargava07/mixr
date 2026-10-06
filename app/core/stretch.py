@@ -19,6 +19,7 @@ warp map in that stretch's own time, and the output duration.
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 from fractions import Fraction
@@ -32,12 +33,37 @@ from . import warp
 MODES = ("crisp", "tones", "slice", "repitch")
 
 
+def _rubberband_bin() -> str:
+    """Find the Rubber Band binary.
+
+    Not just "rubberband": launched as a login agent, the server inherits
+    launchd's minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin), which has no
+    Homebrew in it — so every warp failed with FileNotFoundError while the
+    same code worked fine from a shell.
+    """
+    found = shutil.which("rubberband")
+    if found:
+        return found
+    for p in ("/opt/homebrew/bin/rubberband", "/usr/local/bin/rubberband",
+              "/opt/local/bin/rubberband"):
+        if Path(p).exists():
+            return p
+    raise RuntimeError(
+        "Rubber Band isn't installed, or isn't on this process's PATH. "
+        "Install it with `brew install rubberband`.")
+
+
+RUBBERBAND = None
+
+
 def rubberband(y, sr, pins, out_dur, pitch=0.0, mode="crisp"):
     """Rubber Band with a time map (crisp or tones)."""
     with tempfile.TemporaryDirectory() as d:
         src, dst, mp = Path(d) / "in.wav", Path(d) / "out.wav", Path(d) / "map.txt"
         sf.write(src, y.T, sr)
-        cmd = ["rubberband", "-q", "-p", f"{pitch:.3f}"]
+        global RUBBERBAND
+        RUBBERBAND = RUBBERBAND or _rubberband_bin()
+        cmd = [RUBBERBAND, "-q", "-p", f"{pitch:.3f}"]
         cmd += ["-c", "6"] if mode == "crisp" else ["-F"]
         if pins:
             frames, _ = warp.rubberband_map(pins, y.shape[1] / sr, sr)
