@@ -49,14 +49,15 @@ async def no_cache(request, call_next):
 SOURCES = {
     "mixes":   ROOT / "mixes",              # finished mixes made in mixr
     "media":   ROOT / "library" / "audio",  # imported source tracks
+    "kits":    ROOT / "library" / "audio" / "kits",   # drum one-shots
     # internal: reachable by path (clips reference them) but not listed
     "stems":   ROOT / "app" / "_stems",
     "renders": ROOT / "renders",
     "bounces": ROOT / "app" / "_bounces",
     "examples": ROOT / "example_mixes",
 }
-VISIBLE = ["mixes", "media"]
-LABELS = {"mixes": "Mixes", "media": "Your Media"}
+VISIBLE = ["mixes", "media", "kits"]
+LABELS = {"mixes": "Mixes", "media": "Your Media", "kits": "Drum Kits"}
 for _f in SOURCES.values():
     _f.mkdir(parents=True, exist_ok=True)
 PROJECTS = ROOT / "app" / "_projects"
@@ -155,6 +156,9 @@ def list_sources():
             for f in sorted(folder.rglob("*")):
                 if f.suffix.lower() not in AUDIO_EXT or f.name.startswith("."):
                     continue
+                # kits have their own section; don't list them twice
+                if key == "media" and "kits" in f.relative_to(folder).parts:
+                    continue
                 files.append({"file": str(f.relative_to(folder)),
                               "name": f.stem,
                               "ext": f.suffix.lstrip(".").lower(),
@@ -188,6 +192,37 @@ def get_analysis(source: str, name: str):
 def get_audio(source: str, name: str):
     wav = audio.to_wav(_resolve(source, name))
     return FileResponse(wav, media_type="audio/wav", filename=wav.name)
+
+
+# ------------------------------------------------------------------ kits
+_kit_jobs: dict[str, dict] = {}
+
+
+@app.post("/api/kit/extract")
+def kit_extract(source: str, name: str, kit: str = ""):
+    """Mine one-shots out of a file. Demucs may need to run first, so this
+    goes on a thread and the browser polls, same as stem separation."""
+    import threading
+    from analysis.extract_kit import extract
+    src = _resolve(source, name)
+    kit = (kit or Path(name).stem)[:60]
+    job = uuid.uuid4().hex[:12]
+    _kit_jobs[job] = {"state": "running", "kit": kit}
+
+    def run():
+        try:
+            written, _ = extract(src, kit)
+            _kit_jobs[job] = {"state": "done", "kit": kit, "counts": written}
+        except Exception as e:
+            _kit_jobs[job] = {"state": "error", "error": str(e)}
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"job": job, "kit": kit}
+
+
+@app.get("/api/kit/status")
+def kit_status(job: str):
+    return _kit_jobs.get(job, {"state": "unknown"})
 
 
 @app.get("/api/fx")

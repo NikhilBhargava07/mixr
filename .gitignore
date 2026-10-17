@@ -42,3 +42,6 @@ research/
 
 # bounced audio (freeze, consolidate, reverse) — rebuildable from the project
 app/_bounces/
+
+# extracted one-shots — rebuildable with analysis/extract_kit.py
+library/audio/kits/

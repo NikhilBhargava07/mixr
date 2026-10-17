@@ -33,6 +33,10 @@ just refresh the page.
 - shift-click to select several clips; ⌘A selects all, Esc clears
 - ⌘C / ⌘X / ⌘V copy, cut and paste at the playhead; ⌘D duplicates after the selection
 - ← → nudge selected clips by a bar (hold alt for 10 ms)
+- **Drum Kits** in the sidebar holds extracted one-shots; clicking one drops it
+  at the playhead (on the selected track, or a new one named after the kit)
+- right-click a clip ▸ **Extract drum kit from this clip** mines one-shots out
+  of whatever that clip points at
 - right-click a clip for warping: **match project tempo**, **warp every bar to
   grid**, **match project key**, transpose, and the Beats/Tones warp mode
 - double-click a clip's bottom strip to drop a warp pin, drag a pin to warp the

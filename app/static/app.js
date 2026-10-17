@@ -194,7 +194,7 @@ async function getBuffer(c) {
 }
 
 // ---------------------------------------------------------------- browser
-const sectionOpen = { mixes: true, media: true };   // remembers per-session
+const sectionOpen = { mixes: true, media: true, kits: false };  // remembers per-session
 
 function fmtSize(b) {
   return b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.round(b / 1e3) + " KB";
@@ -231,16 +231,34 @@ async function loadBrowser() {
       e.className = "empty";
       e.textContent = g.source === "mixes"
         ? "No mixes yet — export one and it lands here"
+        : g.source === "kits"
+        ? "No kits yet — right-click a clip ▸ Extract drum kit"
         : "No media yet — import audio to get started";
       body.appendChild(e);
     }
+    // Kits arrive as "<kit>/<hit>.wav"; show one sub-heading per kit so a
+    // hundred one-shots don't read as one flat list.
+    let lastKit = null;
     for (const f of g.files) {
+      if (g.source === "kits") {
+        const kit = f.file.includes("/") ? f.file.split("/")[0] : "—";
+        if (kit !== lastKit) {
+          lastKit = kit;
+          const k = document.createElement("div");
+          k.className = "kithead";
+          k.textContent = kit;
+          body.appendChild(k);
+        }
+      }
       const d = document.createElement("div");
       d.className = "file";
       d.title = `${f.file} · ${fmtSize(f.size)}`;
-      d.innerHTML = `<span class="fname">${f.name}</span>` +
+      const label = g.source === "kits" ? f.name : f.name;
+      d.innerHTML = `<span class="fname">${label}</span>` +
                     `<span class="fext">${f.ext}</span>`;
-      d.onclick = () => addAsTrack(g.source, f.file);
+      // a one-shot belongs on the timeline where the playhead is, not as a
+      // whole new track per hit
+      d.onclick = () => g.source === "kits" ? dropOneShot(f.file) : addAsTrack(g.source, f.file);
       body.appendChild(d);
     }
     sec.appendChild(body);
@@ -272,6 +290,25 @@ async function loadBrowser() {
                             : `imported ${done} file${done > 1 ? "s" : ""}`);
   };
   side.appendChild(imp);
+}
+
+// Drop a kit sample at the playhead: onto the selected track if there is one,
+// otherwise onto a new track named after the kit.
+async function dropOneShot(file) {
+  const at = snap(currentTime());
+  let tid = selected && selected.track;
+  if (!tid) {
+    const kit = file.includes("/") ? file.split("/")[0] : "Kit";
+    tid = (await post(`/api/track/add?name=${encodeURIComponent(kit)}` +
+                      `&color=${encodeURIComponent("#ffa94d")}`)).track;
+  }
+  const name = file.split("/").pop().replace(/\.[^.]+$/, "");
+  const r = await post(`/api/clip/add?track=${tid}`, { source: "kits", file, name, start: at });
+  project = r.project;
+  selectOnly(tid, r.clip);
+  render();
+  await ensureWaves(); render();
+  setStatus(`${name} at ${fmt(at)}`);
 }
 
 async function addAsTrack(source, file) {
@@ -1943,6 +1980,7 @@ function clipMenu(tr, c, px, py) {
         } catch (e) { setStatus(`consolidate failed: ${e.message}`); }
       } },
     { sep: true },
+    { label: "Extract drum kit from this clip", run: () => extractKit(c) },
     { label: stemJobs.has(tr.id) ? "Separating…" : "Separate track into stems",
       disabled: stemJobs.has(tr.id), run: () => separateStems(tr) },
     { sep: true },
@@ -2014,6 +2052,29 @@ window.addEventListener("keydown", (e) => {
 const stemJobs = new Set();     // track ids currently separating
 const STEM_COLORS = { vocals: "#ff6b9d", drums: "#ffa94d",
                       bass: "#845ef7", other: "#38d9a9" };
+
+// Mine one-shots out of a clip's source file. Demucs may have to run first,
+// so poll like stem separation does.
+async function extractKit(c) {
+  const kit = (c.file.split("/").pop() || "kit").replace(/\.[^.]+$/, "").slice(0, 40);
+  setStatus(`extracting a kit from "${kit}" — this can take a minute…`);
+  try {
+    const q = `source=${encodeURIComponent(c.source)}&name=${encodeURIComponent(c.file)}` +
+              `&kit=${encodeURIComponent(kit)}`;
+    const { job } = await post(`/api/kit/extract?${q}`);
+    let st;
+    for (let i = 0; i < 400; i++) {
+      st = await api(`/api/kit/status?job=${job}`);
+      if (st.state !== "running") break;
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    if (!st || st.state !== "done") throw new Error((st && st.error) || "timed out");
+    sectionOpen.kits = true;
+    await loadBrowser();
+    const counts = Object.entries(st.counts || {}).map(([k, n]) => `${n} ${k}`).join(", ");
+    setStatus(counts ? `kit "${st.kit}": ${counts}` : `no clean one-shots found in "${kit}"`);
+  } catch (e) { setStatus(`kit extraction failed: ${e.message}`); }
+}
 
 async function separateStems(tr) {
   const c = tr.clips[0];
