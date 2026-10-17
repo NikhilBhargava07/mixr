@@ -351,15 +351,25 @@ function render() {
   // ---- ruler + grid
   g.fillStyle = "#1c1f26"; g.fillRect(0, 0, W, RULER_H);
   const visT0 = scrollX, visT1 = scrollX + (W - HEAD_W) / pxPerSec;
-  for (const { t: bt, i } of gridBars(visT0 - 1, visT1 + 1)) {
+  // bars, beats, eighths, sixteenths — each level only drawn when there's
+  // room for it, so the grid thins out as you zoom away instead of turning
+  // into a grey block
+  const beatPx = (240 / (project.bpm || 100)) / 4 * pxPerSec;
+  const show = [true, beatPx > 9, beatPx > 26, beatPx > 46];
+  const COLOR = ["#5b6478", "#39404f", "#2b313d", "#252a34"];
+  for (const { t: bt, level, bar, step } of gridLines(visT0 - 1, visT1 + 1)) {
+    if (!show[level]) continue;
     const px = x(bt);
     if (px < HEAD_W) continue;                     // not over the header column
-    g.strokeStyle = i % 4 === 0 ? "#5b6478" : "#333a48";
+    g.strokeStyle = level === 0 && bar % 4 === 0 ? "#6c7689" : COLOR[level];
     g.lineWidth = 1;
-    g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke();
-    if (i % 4 === 0) {
+    g.beginPath(); g.moveTo(px, level ? RULER_H - 6 : 0); g.lineTo(px, H); g.stroke();
+    if (level === 0) {
       g.fillStyle = "#7c8697"; g.font = "10px system-ui";
-      g.fillText(String(i + 1), px + 3, 12);
+      g.fillText(String(bar + 1), px + 3, 12);
+    } else if (level === 1 && beatPx > 30) {       // 2 3 4 inside the bar
+      g.fillStyle = "#58616f"; g.font = "9px system-ui";
+      g.fillText(stepLabel(step), px + 2, 12);
     }
   }
   for (let s = Math.ceil(visT0); s < visT1; s++) {
@@ -461,6 +471,10 @@ function render() {
   const px = x(t);
   if (px >= HEAD_W) drawPlayhead(g, px, H, W);
   $("time").textContent = fmt(t);
+  const near = gridLines(t - 2, t + 2).reduce(
+    (a, b) => (a && Math.abs(a.t - t) <= Math.abs(b.t - t) ? a : b), null);
+  if (near && $("pos")) $("pos").textContent =
+    `${near.bar + 1}.${stepLabel(near.step)}`;
   updateScrollbar();
   updateVScroll();
   showBpm();
@@ -2151,12 +2165,44 @@ function gridBars(t0, t1) {
   return out;
 }
 
+// Every line in the bar, down to 16ths. level 0 = bar, 1 = beat, 2 = eighth,
+// 3 = sixteenth. Subdividing between consecutive BAR lines (rather than from
+// a fixed tempo) means the beats follow an analysed grid when the song drifts.
+function gridLines(t0, t1) {
+  const out = [];
+  if (!project) return out;
+  let bars = gridBars(t0 - 10, t1 + 10);
+  if (bars.length < 2) {
+    const bar = 240 / (project.bpm || 100);
+    bars = [];
+    for (let i = Math.max(0, Math.floor(t0 / bar) - 1); i * bar <= t1 + bar; i++)
+      bars.push({ t: i * bar, i });
+  }
+  for (let k = 0; k + 1 < bars.length; k++) {
+    const a = bars[k].t, span = bars[k + 1].t - a;
+    if (span <= 0) continue;
+    for (let s = 0; s < 16; s++) {
+      const time = a + span * s / 16;
+      if (time < t0 || time > t1) continue;
+      out.push({ t: time, level: s === 0 ? 0 : s % 4 === 0 ? 1 : s % 2 === 0 ? 2 : 3,
+                 bar: bars[k].i, step: s });
+    }
+  }
+  return out;
+}
+
+// "1", "2e", "3&", "4a" — what you'd call the position out loud
+const STEP_NAME = ["1", "e", "&", "a"];
+const stepLabel = (step) => `${Math.floor(step / 4) + 1}${step % 4 ? STEP_NAME[step % 4] : ""}`;
+
 function snap(t) {
   if (!project || !$("snap").checked) return t;
+  const finest = { bar: 0, beat: 1, "8": 2, "16": 3 }[$("snapres").value] ?? 1;
   let best = t, bd = Infinity;
-  for (const b of gridBars(t - 8, t + 8)) {
-    const dd = Math.abs(b.t - t);
-    if (dd < bd) { bd = dd; best = b.t; }
+  for (const g of gridLines(t - 6, t + 6)) {
+    if (g.level > finest) continue;
+    const dd = Math.abs(g.t - t);
+    if (dd < bd) { bd = dd; best = g.t; }
   }
   return bd * pxPerSec < 14 ? best : t;
 }

@@ -14,7 +14,14 @@
       <input id="bpm" class="mono" type="text" size="6" value="100"><span>BPM</span></label>
     <button id="zoomOut" class="ghost">−</button>
     <button id="zoomIn" class="ghost">+</button>
-    <label class="toggle"><input type="checkbox" id="snap" checked> snap to bars</label>
+    <span id="pos" class="mono" title="bar . beat">1.1</span>
+    <label class="toggle"><input type="checkbox" id="snap" checked> snap</label>
+    <select id="snapres" title="what the snap lands on">
+      <option value="bar">bar</option>
+      <option value="beat" selected>beat</option>
+      <option value="8">1/8</option>
+      <option value="16">1/16</option>
+    </select>
     <label class="toggle"><input type="checkbox" id="loop"> loop</label>
     <label class="toggle"><input type="checkbox" id="click"> click</label>
     <label class="toggle"><input type="checkbox" id="countin"> count-in</label>
@@ -40,6 +47,7 @@
       · double-click a clip's bottom strip to add a warp pin · drag a pin to warp · alt-click removes it
       · shift-click clips to select several · ⌘A all · ⌘C/⌘X/⌘V copy, cut, paste at the playhead · ⌘D duplicate
       · shift-drag the ruler to set a loop · right-click the ruler for markers · drag a track's name to reorder
+      · the grid shows bars, beats, 1/8 and 1/16 as you zoom in · set what snap lands on next to the checkbox
       · ← → nudge by a bar (alt = 10 ms) · Home/End jump · scroll with the bar under the tracks
     </p>
   </section>

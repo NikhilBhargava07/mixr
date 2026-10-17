@@ -21,6 +21,10 @@ just refresh the page.
   place in the bar (the clip label shows the resulting speed, e.g. 80.0%)
 - each track header has a **level meter**; the bar in the toolbar is the master
   (click it to set the master fader, or let mixr fit the mix to −1 dBFS)
+- the timeline grid draws **bars, beats, 1/8 and 1/16** — each level appears as
+  you zoom in far enough for it; the readout next to the BPM box shows the
+  playhead's position as bar.beat (e.g. `3.2&` = bar 3, the & of 2)
+- the **snap** dropdown sets what things land on: bar, beat, 1/8 or 1/16
 - **+ / −** zoom the timeline
 - scroll sideways with a trackpad swipe, **shift + scroll wheel**, or the scrollbar under the tracks
 - **Home** jumps back to the start; **End** to the end
