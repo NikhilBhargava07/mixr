@@ -31,6 +31,10 @@ Sidechain is the one that matters for this music — it's the direct fix for the
 808-vs-dhol collision measured on Mmhmm.
 
 ### Step sequencer + drum rack
+`analysis/extract_kit.py` can now mine one-shots out of any mix (kick/snare/
+hat/tom, sorted by how isolated the hit is) — so there are sounds to play.
+What's missing is the thing that plays them: a 16-step grid per sample, in
+mixr, rendering to the same clip model.
 The conceptual hole: mixr can only arrange audio that already exists. A dhol
 bed has to be programmed. `engine/instruments.py` already synthesises dagga and
 tilli; wire a 16-step grid to it and the beds get built inside mixr instead of
