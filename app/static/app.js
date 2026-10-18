@@ -37,6 +37,7 @@ const selectedClips = () => selection.map(s => {
 
 const TRACK_H = 84, HEAD_W = 190, RULER_H = 30;
 const PH_W = 8, PH_HEAD_H = 13;   // playhead handle: half-width, height
+const TRIM_PX = 11;               // how wide a clip's trim edge is, in pixels
 const PIN_W = 4, PIN_H = 11;      // warp-pin handle: half-width, height
 
 // ---------------------------------------------------------------- helpers
@@ -450,6 +451,11 @@ function render() {
       g.lineWidth = isSel ? 2 : 1;
       g.strokeRect(cx + .5, y + 4.5, cw - 1, TRACK_H - 13);
 
+      if (hoverEdge && hoverEdge.clip === c.id) {       // the grabbable edge
+        g.fillStyle = "#ffffff";
+        const ex = hoverEdge.side === "trim-left" ? cx : cx + cw - 3;
+        g.fillRect(ex, y + 4, 3, TRACK_H - 12);
+      }
       const wf = waveCache.get(key(c));
       if (wf) drawClipWave(g, wf, c, cx, cw, y + 8, TRACK_H - 20, tr.color);
       drawFades(g, c, cx, cw, y + 4, TRACK_H - 12, isSel);
@@ -1053,26 +1059,36 @@ function hit(mx, my) {
   const t = scrollX + (mx - HEAD_W) / pxPerSec;
   for (const c of tr.clips) {
     if (t >= c.start && t <= clipEnd(c)) {
-      const edge = 6 / pxPerSec;
-      // top strip of the clip = fade handles (checked BEFORE trim so the
-      // corners aren't ambiguous)
-      // bottom strip = warp pins, checked first: it's their only grab area
+      // Trimming gets the whole height of the clip except the fade corners.
+      // It used to be a 6px-wide target squeezed into a 40px band between the
+      // fade strip and the warp-pin strip, with no cursor telling you where it
+      // was — which made it a game of pixel-hunting.
+      // never let the two edge zones swallow the clip: a drum one-shot is a
+      // few pixels wide, and an 11px zone on each side left nothing in the
+      // middle to grab — so the left edge won every click and the clip could
+      // neither be moved nor trimmed from the right
+      const edge = Math.min(TRIM_PX / pxPerSec, c.length * 0.3);
+      const inTop = my - y < 18;
+      if (!inTop) {
+        if (t < c.start + edge) return { kind: "trim-left", track: tr, clip: c, t };
+        if (t > clipEnd(c) - edge) return { kind: "trim-right", track: tr, clip: c, t };
+      }
+      // bottom strip = warp pins (minus the edges, which trim just claimed)
       if (my - y > TRACK_H - 26) {
         const grab = 7 / pxPerSec;
         const near = pinsInWindow(c).find(o => Math.abs(t - o.t) < grab);
         if (near) return { kind: "warp-pin", track: tr, clip: c, t, pin: near.i };
         return { kind: "pin-strip", track: tr, clip: c, t };
       }
-      const topStrip = my - y < 18;
-      if (topStrip) {
+      if (inTop) {                       // fade handles keep the top corners
         const grab = 9 / pxPerSec;
         if (Math.abs(t - (c.start + c.fade_in)) < grab)
           return { kind: "fade-in", track: tr, clip: c, t };
         if (Math.abs(t - (clipEnd(c) - c.fade_out)) < grab)
           return { kind: "fade-out", track: tr, clip: c, t };
+        if (t < c.start + edge) return { kind: "trim-left", track: tr, clip: c, t };
+        if (t > clipEnd(c) - edge) return { kind: "trim-right", track: tr, clip: c, t };
       }
-      if (t < c.start + edge) return { kind: "trim-left", track: tr, clip: c, t };
-      if (t > clipEnd(c) - edge) return { kind: "trim-right", track: tr, clip: c, t };
       return { kind: "clip", track: tr, clip: c, t };
     }
   }
@@ -1182,10 +1198,30 @@ $("timeline").addEventListener("mousedown", async (e) => {
 
 // Hover feedback. The window-level mousemove below only runs mid-drag, so the
 // canvas cursor never changed; over the ruler it should read as scrubbable.
+let hoverEdge = null;            // {clip, side} while the mouse is over a trim edge
+
+const CURSOR = { "trim-left": "ew-resize", "trim-right": "ew-resize",
+                 "fade-in": "crosshair", "fade-out": "crosshair",
+                 "warp-pin": "grab", "menu": "pointer", "meter": "pointer",
+                 "mute": "pointer", "solo": "pointer", "volume": "ew-resize",
+                 "header": "grab" };
+
 $("timeline").addEventListener("mousemove", (e) => {
   if (drag) return;                       // mid-drag the cursor stays put
   const r = $("timeline").getBoundingClientRect();
-  $("timeline").style.cursor = (e.clientY - r.top) < RULER_H ? "ew-resize" : "default";
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (my < RULER_H) {
+    $("timeline").style.cursor = "ew-resize";
+    if (hoverEdge) { hoverEdge = null; render(); }
+    return;
+  }
+  const h = hit(mx, my);
+  $("timeline").style.cursor = (h && CURSOR[h.kind]) || "default";
+  // light up the edge you're about to grab, so trimming is visible, not guesswork
+  const edge = h && (h.kind === "trim-left" || h.kind === "trim-right")
+    ? { clip: h.clip.id, side: h.kind } : null;
+  const same = (a, b) => (!a && !b) || (a && b && a.clip === b.clip && a.side === b.side);
+  if (!same(edge, hoverEdge)) { hoverEdge = edge; render(); }
 });
 
 function dragMoveTo(clientX) {
