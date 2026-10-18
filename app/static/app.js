@@ -584,7 +584,15 @@ function drawClipWave(g, wf, c, cx, cw, y, h, color) {
 // at the start instead of running backwards.
 function currentTime() {
   if (!playing) return playOffset;
-  return Math.max(playOffset, playOffset + (actx.currentTime - playStart));
+  const raw = Math.max(playOffset, playOffset + (actx.currentTime - playStart));
+  // While looping, the audio clock is the truth: fold it back into the loop.
+  // Returning from a hidden tab lands on the right spot instead of miles past
+  // the end.
+  if (loopPlan && actx.currentTime >= loopPlan.firstWrapAt) {
+    const since = actx.currentTime - loopPlan.firstWrapAt;
+    return loopPlan.start + (since % loopPlan.len);
+  }
+  return raw;
 }
 
 const loopOn = () => project && project.loop_on && project.loop_end > project.loop_start;
@@ -647,7 +655,9 @@ function makeBus(ctx, tr, dest, metered) {
 }
 
 function scheduleClip(ctx, out, tr, c, t0, startTime) {
-  const { buffer, base } = bufCache.get(key(c));
+  const entry = bufCache.get(key(c));
+  if (!entry) return null;                     // not loaded yet; never crash playback
+  const { buffer, base } = entry;
   const sr = buffer.sampleRate;
   const skip = Math.max(0, t0 - c.start);            // how far into the clip we begin
   const dur = c.length - skip;
@@ -706,9 +716,18 @@ async function play() {
   const t0 = playOffset;
   const soloed = project.tracks.some(t => t.solo);
   const jobs = [];
+  const looping = loopOn() && t0 < project.loop_end;
   for (const tr of project.tracks) {
     if (tr.mute || (soloed && !tr.solo)) continue;
-    for (const c of tr.clips) if (c.start + c.length > t0) jobs.push({ tr, c });
+    for (const c of tr.clips) {
+      // Anything we'll need: what plays from here on, plus — when looping —
+      // everything inside the loop, including clips that start BEFORE the
+      // playhead and so would never otherwise be loaded.
+      const ahead = c.start + c.length > t0;
+      const inLoop = looping && c.start + c.length > project.loop_start
+                             && c.start < project.loop_end;
+      if (ahead || inLoop) jobs.push({ tr, c });
+    }
   }
   const pending = jobs.filter(j => !bufCache.has(key(j.c))).length;
   if (pending) setStatus(`loading ${pending} clip${pending > 1 ? "s" : ""}…`);
@@ -751,7 +770,7 @@ async function play() {
   }
   const horizon = loopOn() ? project.loop_end : t0 + 600;
   liveNodes.push(...scheduleClicks(actx, t0, horizon, playStart, actx.destination));
-  loopPass = { at: playStart, from: t0, scheduled: false };
+  planLoop(t0);
   $("play").textContent = "Pause";
   tick();
 }
@@ -762,6 +781,7 @@ function pause() {
   liveNodes.forEach(n => { try { n.stop(); } catch (e) {} });
   liveNodes = [];
   buses = {}; master = null;
+  stopLoopTimer();
   playing = false;
   silenceMeters();                 // nothing is playing; don't leave bars frozen mid-air
   $("play").textContent = "Play";
@@ -923,37 +943,86 @@ function drawMasterMeter() {
 // Looping without a gap: a quarter second before the loop ends, schedule the
 // next pass to begin exactly at the loop point. Tearing the nodes down and
 // rebuilding them at the boundary (the way a seek does) would click.
-let loopPass = null;
+let loopPlan = null;      // {firstWrapAt, len, start, end, scheduledUntil} in ctx time
+let loopTimer = null;     // a Worker ticking the top-up, because page timers
+                          // and animation frames both stall in a hidden tab
+const LOOP_LOOKAHEAD = 60;    // seconds of laps kept queued in the audio graph.
+                              // Enough to survive a hidden tab's throttled
+                              // timers (Chrome can drop background timers to
+                              // once a minute) without queueing hundreds of
+                              // nodes for a short loop.
 
-function serviceLoop() {
-  if (!loopOn() || !loopPass || !actx) return;
-  const t = currentTime();
-  const remaining = project.loop_end - t;
-  if (!loopPass.scheduled && remaining < 0.25 && remaining > -1) {
-    const at = actx.currentTime + remaining;
-    const soloed = project.tracks.some(x => x.solo);
-    for (const tr of project.tracks) {
-      if (tr.mute || (soloed && !tr.solo) || !buses[tr.id]) continue;
-      for (const c of tr.clips) {
-        if (c.start + c.length <= project.loop_start || c.start >= project.loop_end) continue;
-        const src = scheduleClip(actx, buses[tr.id].gain, tr, c, project.loop_start, at);
-        if (src) liveNodes.push(src);
-      }
+// Scheduling must not depend on the screen. Web Audio plays what has been
+// scheduled whether or not the tab is visible, so the fix is to queue laps far
+// ahead and top them up from a worker — rAF (and page setInterval) are
+// throttled or frozen in a background tab, which is why the loop used to run
+// straight past its end point when you switched away.
+function workerTicker(fn, ms) {
+  try {
+    const src = `let id; onmessage = e => { clearInterval(id); id = setInterval(() => postMessage(0), e.data); };`;
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    w.onmessage = fn;
+    w.postMessage(ms);
+    return w;
+  } catch (e) {
+    const id = setInterval(fn, ms);              // fall back to a page timer
+    return { terminate: () => clearInterval(id) };
+  }
+}
+
+function scheduleLoopPass(at) {
+  const soloed = project.tracks.some(x => x.solo);
+  for (const tr of project.tracks) {
+    if (tr.mute || (soloed && !tr.solo) || !buses[tr.id]) continue;
+    for (const c of tr.clips) {
+      if (c.start + c.length <= project.loop_start || c.start >= project.loop_end) continue;
+      const src = scheduleClip(actx, buses[tr.id].gain, tr, c, project.loop_start, at);
+      if (src) liveNodes.push(src);
     }
-    liveNodes.push(...scheduleClicks(actx, project.loop_start, project.loop_end, at, actx.destination));
-    loopPass.scheduled = true;       // exactly once per pass, or the passes stack
-    loopPass.nextAt = at;
   }
-  if (t >= project.loop_end && loopPass.nextAt) {  // the new pass is already sounding
-    playOffset = project.loop_start;
-    playStart = loopPass.nextAt;
-    loopPass = { at: loopPass.nextAt, from: project.loop_start, scheduled: false };
+  liveNodes.push(...scheduleClicks(actx, project.loop_start, project.loop_end, at, actx.destination));
+}
+
+function topUpLoop() {
+  if (!playing || !loopPlan || !actx) return;
+  const until = actx.currentTime + LOOP_LOOKAHEAD;
+  let guard = 0;
+  while (loopPlan.scheduledUntil < until && guard++ < 64) {
+    scheduleLoopPass(loopPlan.scheduledUntil);
+    loopPlan.scheduledUntil += loopPlan.len;
   }
+}
+
+// Build the plan at the moment playback starts (or the loop changes).
+function planLoop(t0) {
+  loopPlan = null;
+  if (!loopOn() || t0 >= project.loop_end) return;
+  const len = project.loop_end - project.loop_start;
+  if (len <= 0.05) return;
+  loopPlan = { firstWrapAt: playStart + (project.loop_end - t0), len,
+               start: project.loop_start, end: project.loop_end,
+               scheduledUntil: playStart + (project.loop_end - t0) };
+  topUpLoop();
+  if (loopTimer) loopTimer.terminate();
+  loopTimer = workerTicker(topUpLoop, 1000);
+}
+
+function stopLoopTimer() {
+  if (loopTimer) { loopTimer.terminate(); loopTimer = null; }
+  loopPlan = null;
+}
+
+// Changing the loop mid-playback re-plans from where we are now.
+function replanLoop() {
+  if (!playing || !actx) return;
+  const t = currentTime();
+  playOffset = t; playStart = actx.currentTime;
+  planLoop(t);
 }
 
 function tick() {
   if (!playing) return;
-  serviceLoop();
+  topUpLoop();                 // belt and braces while the tab is visible
   readMeters();
   followPlayhead();
   render();
@@ -1237,6 +1306,7 @@ window.addEventListener("mouseup", async () => {
     drag = null;
     project = await post("/api/project/loop", { start: loop_start, end: loop_end, on: true });
     $("loop").checked = project.loop_on;
+    replanLoop();
     setStatus(`loop ${fmt(project.loop_start)} – ${fmt(project.loop_end)}`);
     render(); return;
   }
@@ -1702,16 +1772,16 @@ function rulerMenu(mx, px, py) {
   items.push({ label: "Loop the next 8 bars", run: async () => {
     const bar = 240 / (project.bpm || 100);
     project = await post("/api/project/loop", { start: at, end: at + bar * 8, on: true });
-    $("loop").checked = true; render(); } });
+    $("loop").checked = true; replanLoop(); render(); } });
   if (selection.length) items.push({ label: "Loop the selected clips", run: async () => {
     const cs = selectedClips();
     project = await post("/api/project/loop", {
       start: Math.min(...cs.map(({ c }) => c.start)),
       end: Math.max(...cs.map(({ c }) => clipEnd(c))), on: true });
-    $("loop").checked = true; render(); } });
+    $("loop").checked = true; replanLoop(); render(); } });
   if (project.loop_end > project.loop_start) items.push({ label: "Clear loop", run: async () => {
     project = await post("/api/project/loop", { start: 0, end: 0, on: false });
-    $("loop").checked = false; render(); } });
+    $("loop").checked = false; stopLoopTimer(); render(); } });
   openMenu(px, py, items, near ? `Marker · ${near.name}` : "Ruler");
 }
 
@@ -2261,6 +2331,7 @@ $("loop").onchange = async (e) => {
       { start: project.loop_start, end: project.loop_end, on: e.target.checked });
   }
   setStatus(project.loop_on ? `loop ${fmt(project.loop_start)} – ${fmt(project.loop_end)}` : "loop off");
+  replanLoop();                       // take effect immediately if we're playing
   render();
 };
 $("undo").onclick = doUndo;

@@ -28,6 +28,9 @@ just refresh the page.
 - **+ / −** zoom the timeline
 - scroll sideways with a trackpad swipe, **shift + scroll wheel**, or the scrollbar under the tracks
 - **Home** jumps back to the start; **End** to the end
+- looping keeps working when the tab is in the background: laps are queued
+  into the audio graph a minute ahead and topped up by a worker, because
+  animation frames (and page timers) stall in a hidden tab
 - **loop / click / count-in** toggles sit in the toolbar; shift-drag the ruler
   to set the loop, or right-click the ruler for markers and loop presets
 - drag a track's name up or down to reorder it
