@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parent.parent
 WAV = ROOT / "workdir" / "wav"
 SR = 22050
 HOP = 512
+MAX_PROBE = 240.0   # above this, the tempogram has no musical content to read
+MIN_FELT = 40.0
 
 
 def ratio(y, sr, felt: float, tol: float = 0.055) -> dict:
@@ -38,6 +40,13 @@ def ratio(y, sr, felt: float, tol: float = 0.055) -> dict:
 
     e15, e20 = energy_near(felt * 1.5), energy_near(felt * 2.0)
     r = e15 / (e20 + 1e-9)
+    # The probes have to land where music actually has periodicity. Fed a fast
+    # felt pulse (say 161), 1.5x and 2x sit at 242 and 322 BPM, where there is
+    # nothing but noise — and the ratio of two noise figures looks like a
+    # verdict. Refuse instead of answering.
+    if felt * 2.0 > MAX_PROBE or felt < MIN_FELT:
+        return {"felt": felt, "e15": e15, "e20": e20, "ratio": r,
+                "verdict": f"OUT OF RANGE (probes at {felt*1.5:.0f}/{felt*2:.0f} BPM)"}
     verdict = "COMPOUND-leaning" if r > 1.12 else ("straight-leaning" if r < 0.89 else "ambiguous")
     return {"felt": felt, "e15": e15, "e20": e20, "ratio": r, "verdict": verdict}
 
